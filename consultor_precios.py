@@ -23,7 +23,7 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # ESCÁNER LÍMPIO: SIN CORCHETES Y CON QR INHABILITADO
+    # ESCÁNER LÍMPIO: CORCHETES ELIMINADOS POR CSS Y QR BLOQUEADO
         st.components.v1.html("""
             <style>
                 #reader-container {
@@ -34,15 +34,22 @@ def inyectar_auto_enter():
                     overflow: hidden;
                     background: #000;
                     border: 3px solid #D32F2F;
-                    margin-top: -50px; /* Sube el visor en Android */
+                    margin-top: -50px;
                 }
                 #reader { width: 100% !important; }
                 #reader video { 
                     object-fit: cover !important; 
                     height: 250px !important; 
                 }
+
+                /* --- LA SOLUCIÓN DEFINITIVA PARA LOS CORCHETES --- */
+                /* Ocultamos la región de escaneo, los bordes y cualquier dibujo de la librería */
+                #reader__scan_region { display: none !important; }
+                #reader__scan_region svg { display: none !important; }
+                #reader__dashboard_section_csr { display: none !important; }
+                #reader__status_span { display: none !important; }
                 
-                /* LÍNEA LÁSER ESTÉTICA (Sustituye a los corchetes como guía) */
+                /* LÍNEA LÁSER (Única guía visual permitida) */
                 .laser {
                     position: absolute;
                     top: 50%;
@@ -67,8 +74,7 @@ def inyectar_auto_enter():
 
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
-                // 1. CONFIGURACIÓN: SOLO CÓDIGOS 1D (CÓDIGOS DE BARRA)
-                // Esto deja inhabilitado el QR automáticamente
+                // 1. SOLO CÓDIGOS 1D (CÓDIGOS DE BARRA) - ESTO MATA EL QR
                 const formatsToSupport = [
                     Html5QrcodeSupportedFormats.EAN_13,
                     Html5QrcodeSupportedFormats.EAN_8,
@@ -95,12 +101,12 @@ def inyectar_auto_enter():
                     }
                 }
 
-                // 2. INICIO SIN QRBOX (SIN CORCHETES)
+                // 2. CONFIGURACIÓN SIN QRBOX (PARA QUE NO DIBUJE NADA)
                 const config = { 
                     fps: 30,
                     aspectRatio: 1.0,
                     experimentalFeatures: {
-                        useBarCodeDetectorIfSupported: true // Ayuda mucho al iPhone
+                        useBarCodeDetectorIfSupported: true
                     },
                     videoConstraints: {
                         facingMode: "environment",
@@ -112,7 +118,6 @@ def inyectar_auto_enter():
                 setTimeout(() => {
                     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
                     .catch(err => {
-                        console.error(err);
                         html5QrCode.start({ facingMode: "environment" }, { fps: 20 }, onScanSuccess);
                     });
                 }, 500);
