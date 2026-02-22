@@ -23,27 +23,21 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # EL ESCÁNER OPTIMIZADO PARA IPHONE Y ANDROID
+    # EL ESCÁNER RE-CENTRADO Y OPTIMIZADO
         st.components.v1.html("""
-            <div id="reader" style="width:100%; border-radius:15px; overflow:hidden; background-color: #000;"></div>
+            <div id="reader" style="width:100%; border-radius:15px; overflow:hidden; background-color: #000; margin-top: -20px;"></div>
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
                 const beep = new Audio('https://www.soundjay.com/buttons/sounds/button-37a.mp3');
 
                 function onScanSuccess(decodedText) {
-                    // Validamos que parezca un código de barras (solo números o longitud típica)
                     if (!isNaN(decodedText) || decodedText.length >= 8) {
                         const input = window.parent.document.querySelector('input[placeholder="000000000"]');
-                        // Solo procesamos si el input está vacío o es diferente para evitar bucles
                         if (input && input.value !== decodedText) {
                             beep.play().catch(e => console.log("Error sonido", e));
-                            
-                            // Truco para forzar la escritura en el input de Streamlit
                             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                             nativeInputValueSetter.call(input, decodedText);
                             input.dispatchEvent(new Event('input', { bubbles: true }));
-                            
-                            // Pequeño delay para asegurar el foco
                             setTimeout(() => { input.focus(); input.blur(); }, 200);
                         }
                     }
@@ -51,35 +45,34 @@ def inyectar_auto_enter():
 
                 const html5QrCode = new Html5Qrcode("reader");
 
-                // --- CAMBIOS ESPECÍFICOS AQUÍ ---
+                // AJUSTE DE CENTRADO DINÁMICO
                 const config = { 
-                    fps: 25, // Subimos un poco los cuadros por segundo para fluidez
-                    qrbox: { width: 280, height: 150 }, // Caja un poco más ancha
-                    aspectRatio: 1.777778, // VITAL PARA IPHONE: Usar ratio panorámico (16:9)
+                    fps: 25, 
+                    // Esta función fuerza a los corchetes a estar siempre en el centro matemático
+                    qrbox: (viewfinderWidth, viewfinderHeight) => {
+                        let width = viewfinderWidth * 0.75;
+                        let height = viewfinderHeight * 0.5;
+                        if (width > 300) width = 300;
+                        if (height > 180) height = 180;
+                        return { width: width, height: height };
+                    },
+                    aspectRatio: 1.333333, // Cambiamos a 4:3 que es más estable para el centrado en iOS
                     videoConstraints: {
-                        facingMode: "environment", // Cámara trasera
-                        width: { ideal: 1280 },    // Pedimos resolución HD para nitidez
-                        height: { ideal: 720 },
-                        focusMode: "continuous"    // Intento de enfoque continuo
+                        facingMode: "environment",
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
                     }
                 };
 
-                // --- INICIO CON RETRASO PARA SAFARI ---
-                // Damos 800ms para que el iPhone estabilice la cámara antes de empezar a leer
                 setTimeout(() => {
-                    html5QrCode.start(
-                        { facingMode: "environment" }, 
-                        config, 
-                        onScanSuccess
-                    ).catch(err => {
-                        // Si falla la cámara trasera, intenta con la configuración por defecto
-                        console.warn("Error en cámara trasera, reintentando...", err);
+                    html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+                    .catch(err => {
+                        console.warn("Reintentando cámara...", err);
                         html5QrCode.start({ facingMode: "user" }, config, onScanSuccess);
                     });
-                }, 800);
-
+                }, 500);
             </script>
-        """, height=450) # <- Aumentamos un poco la altura del contenedor
+        """, height=350) # Bajamos el height de 450 a 350 para que todo el bloque suba
 
 # --- 3. ESTILOS CSS (Diseño Protagónico) ---
 st.markdown("""
