@@ -23,7 +23,7 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # ESCÁNER PURIFICADO: ELIMINACIÓN POR SCRIPT Y BLOQUEO DE QR
+    # ESCÁNER PURIFICADO: ELIMINACIÓN RADICAL DE CORCHETES Y BLOQUEO DE QR
         st.components.v1.html("""
             <style>
                 #reader-container {
@@ -36,20 +36,21 @@ def inyectar_auto_enter():
                     border: 3px solid #D32F2F;
                     margin-top: -55px;
                 }
-                #reader { width: 100% !important; border: none !important; }
-                #reader video { object-fit: cover !important; height: 250px !important; }
-
-                /* --- NUEVA ESTRATEGIA: OCULTAR TODO LO QUE NO SEA VIDEO --- */
-                #reader__scan_region, 
-                #reader__scan_region svg, 
-                #reader__scan_region div,
-                #reader__dashboard_section_csr,
-                #reader__status_span,
-                div[style*="border"] { 
+                
+                /* --- LA SOLUCIÓN NUCLEAR --- */
+                /* Ocultamos ABSOLUTAMENTE TODO dentro del lector */
+                #reader * { 
                     display: none !important; 
-                    border: none !important;
+                }
+                /* Exceptuamos únicamente al video para que se vea la cámara */
+                #reader video { 
+                    display: block !important; 
+                    object-fit: cover !important; 
+                    width: 100% !important;
+                    height: 250px !important; 
                 }
 
+                /* LÍNEA LÁSER (Nuestra propia guía, no la de la librería) */
                 .laser {
                     position: absolute;
                     top: 50%;
@@ -74,7 +75,7 @@ def inyectar_auto_enter():
 
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
-                // 1. SOLO BARCODES (BLOQUEO DE QR)
+                // 1. BLOQUEO DE QR: Solo permitimos formatos de barras (1D)
                 const formatsToSupport = [
                     Html5QrcodeSupportedFormats.EAN_13,
                     Html5QrcodeSupportedFormats.EAN_8,
@@ -95,10 +96,10 @@ def inyectar_auto_enter():
                     }
                 }
 
-                // 2. CONFIGURACIÓN SIN QRBOX (PARA QUE NO SE GENEREN CORCHETES)
+                // 2. CONFIGURACIÓN SIN QRBOX (Al no haber caja, no hay razón para corchetes)
                 const config = { 
                     fps: 30,
-                    aspectRatio: 1.0,
+                    aspectRatio: 1.333333, // Ratio 4:3 para mejor enfoque en iPhone/Android
                     videoConstraints: {
                         facingMode: "environment",
                         width: { ideal: 1280 },
@@ -106,21 +107,8 @@ def inyectar_auto_enter():
                     }
                 };
 
-                // --- LA SOLUCIÓN MAESTRA ---
-                // Iniciamos y LUEGO borramos lo que la librería cree
+                // Iniciamos el escáner
                 html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
-                .then(() => {
-                    // Esperamos un momento a que los corchetes aparezcan para borrarlos
-                    setTimeout(() => {
-                        const region = document.getElementById('reader__scan_region');
-                        if (region) {
-                            region.style.display = 'none';
-                            // Borramos cualquier borde interno que la librería dibuje con JS
-                            const borders = region.querySelectorAll('div');
-                            borders.forEach(b => b.style.display = 'none');
-                        }
-                    }, 500);
-                })
                 .catch(err => {
                     html5QrCode.start({ facingMode: "environment" }, { fps: 20 }, onScanSuccess);
                 });
