@@ -23,24 +23,28 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # ESCÁNER CON MOTOR NATIVO Y POSICIONAMIENTO FORZADO
+    # ESCÁNER RE-CENTRADO (OPTIMIZADO PARA ANDROID E IPHONE)
         st.components.v1.html("""
             <style>
-                /* Forzamos que el lector no tenga márgenes extraños */
                 #reader { 
                     width: 100% !important; 
-                    border-radius: 15px !important; 
+                    border-radius: 20px !important; 
                     overflow: hidden !important;
-                    background: black !important;
+                    background: #000 !important;
+                    border: 2px solid #D32F2F !important;
+                    /* Subimos todo el contenedor negro */
+                    margin-top: -35px !important; 
                 }
-                /* Ajuste para que el video no se desplace en iPhone */
                 #reader video {
                     object-fit: cover !important;
+                    width: 100% !important;
                 }
-                /* Subimos visualmente los corchetes de enfoque */
+                /* Subimos los corchetes de enfoque específicamente */
                 #reader__scan_region {
-                    transform: translateY(-20px) !important;
+                    transform: translateY(-50px) !important;
                 }
+                /* Ocultamos textos innecesarios de la librería que quitan espacio */
+                #reader__dashboard_section_csr span { display: none !important; }
             </style>
             
             <div id="reader"></div>
@@ -60,12 +64,12 @@ def inyectar_auto_enter():
                 }
 
                 const config = { 
-                    fps: 20, 
-                    qrbox: { width: 260, height: 160 }, // Tamaño fijo y centrado
-                    aspectRatio: 1.0, // Cuadrado perfecto ayuda al centrado en iOS
-                    experimentalFeatures: {
-                        useBarCodeDetectorIfSupported: true // VITAL: Usa el motor de Apple si está disponible
+                    fps: 25, 
+                    // Cuadro de enfoque dinámico y centrado
+                    qrbox: (viewfinderWidth, viewfinderHeight) => {
+                        return { width: 280, height: 160 };
                     },
+                    aspectRatio: 1.333333, // Ratio 4:3 (más natural para sensores de celular)
                     videoConstraints: {
                         facingMode: "environment",
                         width: { ideal: 1280 },
@@ -73,17 +77,14 @@ def inyectar_auto_enter():
                     }
                 };
 
-                // El retraso de 600ms ayuda a Safari a calcular bien el tamaño de la pantalla
                 setTimeout(() => {
                     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
                     .catch(err => {
-                        console.error(err);
-                        // Plan B: Si falla, inicia sin restricciones de resolución
-                        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess);
+                        html5QrCode.start({ facingMode: "environment" }, { fps: 15, qrbox: 250 }, onScanSuccess);
                     });
-                }, 600);
+                }, 500);
             </script>
-        """, height=320) # Reducimos la altura para "empujar" el visor hacia arriba
+        """, height=300) # Reducimos la altura del bloque para que los botones suban
 
 # --- 3. ESTILOS CSS (Diseño Protagónico) ---
 st.markdown("""
