@@ -23,36 +23,67 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # ESCÁNER REFORMADO: POSICIONAMIENTO FORZADO Y ALTA DEFINICIÓN
+    # ESCÁNER FULL-FRAME: SOLO CÓDIGOS DE BARRA (QR DESACTIVADO)
         st.components.v1.html("""
             <style>
-                /* Contenedor principal: lo subimos y le damos un borde para guiar al usuario */
-                #reader { 
-                    width: 100% !important; 
-                    border-radius: 20px !important; 
-                    overflow: hidden !important;
-                    background: #000 !important;
-                    border: 3px solid #D32F2F !important;
-                    margin-top: -60px !important; /* Subida agresiva en Android */
+                #reader-container {
+                    position: relative;
+                    width: 100%;
+                    height: 250px;
+                    border-radius: 20px;
+                    overflow: hidden;
+                    background: #000;
+                    border: 3px solid #D32F2F;
+                    margin-top: -55px; /* Sube el escáner para centrarlo en Android */
                 }
-                /* Forzamos que el video no se desplace hacia abajo */
-                #reader video {
-                    object-fit: cover !important;
-                    width: 100% !important;
-                    height: 100% !important;
+                #reader { width: 100% !important; }
+                #reader video { 
+                    object-fit: cover !important; 
+                    height: 250px !important; 
                 }
-                /* SUBIMOS LOS CORCHETES: Los movemos casi al tope del visor */
-                #reader__scan_region {
-                    transform: translateY(-80px) !important;
+                
+                /* LÍNEA LÁSER GUÍA */
+                .laser {
+                    position: absolute;
+                    top: 50%;
+                    left: 5%;
+                    width: 90%;
+                    height: 2px;
+                    background-color: #D32F2F;
+                    box-shadow: 0 0 12px #FF0000;
+                    z-index: 10;
+                    animation: scanning 1.5s infinite;
                 }
-                /* Estilo para los mensajes de error internos de la librería */
-                #reader__status_span { font-size: 12px !important; color: #666 !important; }
+                @keyframes scanning {
+                    0%, 100% { opacity: 0.4; transform: translateY(-2px); }
+                    50% { opacity: 1; transform: translateY(2px); }
+                }
             </style>
             
-            <div id="reader"></div>
+            <div id="reader-container">
+                <div class="laser"></div>
+                <div id="reader"></div>
+            </div>
+
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
-                const html5QrCode = new Html5Qrcode("reader");
+                // Definimos los formatos permitidos (Solo 1D / Barcodes)
+                // Esto deshabilita automáticamente el QR
+                const formatsToSupport = [
+                    Html5QrcodeSupportedFormats.EAN_13,
+                    Html5QrcodeSupportedFormats.EAN_8,
+                    Html5QrcodeSupportedFormats.CODE_128,
+                    Html5QrcodeSupportedFormats.CODE_39,
+                    Html5QrcodeSupportedFormats.UPC_A,
+                    Html5QrcodeSupportedFormats.UPC_E,
+                    Html5QrcodeSupportedFormats.ITF
+                ];
+
+                const html5QrCode = new Html5Qrcode("reader", { 
+                    formatsToSupport: formatsToSupport,
+                    verbose: false 
+                });
+                
                 const beep = new Audio('https://www.soundjay.com/buttons/sounds/button-37a.mp3');
 
                 function onScanSuccess(decodedText) {
@@ -65,28 +96,25 @@ def inyectar_auto_enter():
                     }
                 }
 
-                // CONFIGURACIÓN DE ALTA SENSIBILIDAD
                 const config = { 
-                    fps: 30, // Más frames ayuda al iPhone a "atrapar" el código en movimiento
-                    qrbox: { width: 300, height: 140 }, // Cuadro más ancho para códigos de barra
-                    aspectRatio: 1.0, 
+                    fps: 30,
+                    aspectRatio: 1.0,
                     videoConstraints: {
                         facingMode: "environment",
-                        // Forzamos resolución vertical alta para que el iPhone no pierda detalle
-                        width: { min: 1024, ideal: 1280, max: 1920 },
-                        height: { min: 720, ideal: 720, max: 1080 }
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
                     }
                 };
 
                 setTimeout(() => {
                     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
                     .catch(err => {
-                        // Plan B si el iPhone rechaza la alta resolución
-                        html5QrCode.start({ facingMode: "environment" }, { fps: 20, qrbox: 250 }, onScanSuccess);
+                        console.error(err);
+                        html5QrCode.start({ facingMode: "environment" }, { fps: 20 }, onScanSuccess);
                     });
-                }, 400);
+                }, 500);
             </script>
-        """, height=300) # Altura compacta para que el botón de abajo suba
+        """, height=280)
 
 # --- 3. ESTILOS CSS (Diseño Protagónico) ---
 st.markdown("""
