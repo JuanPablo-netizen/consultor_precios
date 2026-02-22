@@ -4,6 +4,7 @@ import requests
 import io
 import numpy as np
 import cv2
+import base64  # Nuevo: para el bypass de imágenes
 from bs4 import BeautifulSoup
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
@@ -15,7 +16,6 @@ st.set_page_config(
 
 # --- 2. FUNCIONES DE APOYO (Sonido y Auto-Enter) ---
 def emitir_sonido_ok():
-    # Sonido de confirmación (Beep)
     audio_url = "https://www.soundjay.com/buttons/sounds/button-37a.mp3"
     st.components.v1.html(
         f'<audio autoplay><source src="{audio_url}" type="audio/mp3"></audio>',
@@ -23,131 +23,76 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # ESCÁNER PURIFICADO: ELIMINACIÓN RADICAL DE CORCHETES Y BLOQUEO DE QR
-        st.components.v1.html("""
-            <style>
-                #reader-container {
-                    position: relative;
-                    width: 100%;
-                    height: 250px;
-                    border-radius: 20px;
-                    overflow: hidden;
-                    background: #000;
-                    border: 3px solid #D32F2F;
-                    margin-top: -55px;
+    st.components.v1.html(
+        """
+        <script>
+        const input = window.parent.document.querySelector('input[placeholder="000000000"]');
+        if (input) {
+            input.addEventListener('input', function() {
+                if (this.value.length >= 9) {
+                    const event = new KeyboardEvent('keydown', {
+                        key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true
+                    });
+                    input.dispatchEvent(event);
                 }
-                
-                /* --- LA SOLUCIÓN NUCLEAR --- */
-                /* Ocultamos ABSOLUTAMENTE TODO dentro del lector */
-                #reader * { 
-                    display: none !important; 
-                }
-                /* Exceptuamos únicamente al video para que se vea la cámara */
-                #reader video { 
-                    display: block !important; 
-                    object-fit: cover !important; 
-                    width: 100% !important;
-                    height: 250px !important; 
-                }
+            });
+        }
+        </script>
+        """,
+        height=0,
+    )
 
-                /* LÍNEA LÁSER (Nuestra propia guía, no la de la librería) */
-                .laser {
-                    position: absolute;
-                    top: 50%;
-                    left: 10%;
-                    width: 80%;
-                    height: 2px;
-                    background-color: #D32F2F;
-                    box-shadow: 0 0 10px #FF0000;
-                    z-index: 100;
-                    animation: scanning 2s infinite;
-                }
-                @keyframes scanning {
-                    0%, 100% { opacity: 0.3; }
-                    50% { opacity: 1; }
-                }
-            </style>
-            
-            <div id="reader-container">
-                <div class="laser"></div>
-                <div id="reader"></div>
-            </div>
+# --- 3. LÓGICA DE IMÁGENES (REQUERIMIENTO 3: BYPASS DE BLOQUEO) ---
+@st.cache_data(ttl=3600)
+def obtener_foto_bypass(sku):
+    """
+    Descarga la foto desde el servidor para evitar bloqueos de 'Hotlinking' en navegadores.
+    Convierte la imagen a Base64 para inyectarla directo al HTML.
+    """
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    # URL base de Tricot
+    img_url = f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
+    
+    try:
+        # Descargamos la imagen desde el backend (Railway)
+        img_res = requests.get(img_url, headers=headers, timeout=3)
+        
+        # Si la imagen por defecto no existe, intentamos buscar la real en el HTML del producto
+        if img_res.status_code != 200:
+            prod_url = f"https://www.tricot.cl/{sku}.html"
+            r = requests.get(prod_url, headers=headers, timeout=2)
+            soup = BeautifulSoup(r.text, 'html.parser')
+            tag = soup.find("meta", property="og:image")
+            if tag: 
+                img_res = requests.get(tag["content"], headers=headers, timeout=2)
 
-            <script src="https://unpkg.com/html5-qrcode"></script>
-            <script>
-                // 1. BLOQUEO DE QR: Solo permitimos formatos de barras (1D)
-                const formatsToSupport = [
-                    Html5QrcodeSupportedFormats.EAN_13,
-                    Html5QrcodeSupportedFormats.EAN_8,
-                    Html5QrcodeSupportedFormats.CODE_128,
-                    Html5QrcodeSupportedFormats.UPC_A
-                ];
+        if img_res.status_code == 200:
+            encoded = base64.b64encode(img_res.content).decode()
+            return f"data:image/jpeg;base64,{encoded}"
+    except:
+        pass
+    
+    # Placeholder si no se encuentra nada
+    return "https://via.placeholder.com/400x400.png?text=Imagen+No+Disponible"
 
-                const html5QrCode = new Html5Qrcode("reader", { 
-                    formatsToSupport: formatsToSupport 
-                });
-                
-                function onScanSuccess(decodedText) {
-                    const input = window.parent.document.querySelector('input[placeholder="000000000"]');
-                    if (input && input.value !== decodedText) {
-                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                        nativeInputValueSetter.call(input, decodedText);
-                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                    }
-                }
-
-                // 2. CONFIGURACIÓN SIN QRBOX (Al no haber caja, no hay razón para corchetes)
-                const config = { 
-                    fps: 30,
-                    aspectRatio: 1.333333, // Ratio 4:3 para mejor enfoque en iPhone/Android
-                    videoConstraints: {
-                        facingMode: "environment",
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    }
-                };
-
-                // Iniciamos el escáner
-                html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
-                .catch(err => {
-                    html5QrCode.start({ facingMode: "environment" }, { fps: 20 }, onScanSuccess);
-                });
-            </script>
-        """, height=280)
-
-# --- 3. ESTILOS CSS (Diseño Protagónico) ---
+# --- 4. ESTILOS CSS ---
 st.markdown("""
     <style>
     .stApp { background-color: #FFFFFF; }
-    
-    /* ELIMINAR EL ESPACIO MUERTO SUPERIOR POR DEFECTO DE STREAMLIT */
-    .block-container {
-        padding-top: 3.5rem !important; 
-        padding-bottom: 1rem !important;
-    }
-
-    .sello-gestion {
-        position: fixed; top: 10px; right: 10px; color: #D32F2F;
-        font-size: 11px; font-weight: 800; z-index: 1000;
-        text-transform: uppercase; background: rgba(255,255,255,0.8);
-        padding: 4px 8px; border-radius: 5px; border: 1px solid #FEE2E2;
-    }
+    .block-container { padding-top: 3.5rem !important; padding-bottom: 1rem !important; }
     .product-card {
         background-color: white; padding: 25px; border-radius: 25px;
         box-shadow: 0 10px 40px rgba(0,0,0,0.1); max-width: 450px;
         margin: 0 auto; text-align: center; border: 1px solid #F1F5F9;
     }
-    .product-img { width: 260px; height: auto; max-height: 320px; object-fit: contain; border-radius: 20px; margin-bottom: 20px; }
+    .product-img { width: 100%; max-width: 280px; height: auto; border-radius: 20px; margin-bottom: 20px; }
     .product-title { font-size: 26px; font-weight: 900; color: #111; line-height: 1.1; text-transform: uppercase; }
-    .product-info { font-size: 16px; color: #64748b; font-weight: 600; margin-bottom: 15px; text-transform: uppercase; }
     .price-value { font-size: 70px; font-weight: 950; color: #D32F2F; margin-bottom: 10px; letter-spacing: -2px; line-height: 1; }
     .trend-pill { display: inline-flex; align-items: center; padding: 10px 25px; border-radius: 15px; font-size: 18px; font-weight: 800; }
     .up { background-color: #FFEBEE; color: #D32F2F; }
     .down { background-color: #E8F5E9; color: #2E7D32; }
     .same { background-color: #F5F5F5; color: #616161; }
-    .stTextInput > div > div > input { border-radius: 15px; text-align: center; height: 55px; font-size: 20px !important; }
     
-    /* ESTILO PARA LOS BOTONES (Rojos, grandes y separados) */
     div[data-testid="stButton"] > button {
         background-color: #D32F2F !important;
         color: #FFFFFF !important;
@@ -155,23 +100,14 @@ st.markdown("""
         font-size: 20px !important;
         height: 65px !important;
         border-radius: 15px !important;
-        border: none !important;
-        margin-top: 15px !important;
-        margin-bottom: 15px !important;
         box-shadow: 0 8px 20px rgba(211,47,47,0.3) !important;
     }
-    div[data-testid="stButton"] > button:active { background-color: #9A0007 !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- TÍTULO PRINCIPAL SIEMPRE VISIBLE ---
-st.markdown("""
-    <h1 style='text-align: center; color: #D32F2F; font-size: 28px; font-weight: 900; text-transform: uppercase; margin-top: -20px; margin-bottom: 20px;'>
-        Consultor de Precios Curicó 1
-    </h1>
-""", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; color: #D32F2F; font-size: 28px; font-weight: 900; text-transform: uppercase; margin-top: -20px; margin-bottom: 20px;'>Consultor de Precios Curicó 1</h1>", unsafe_allow_html=True)
 
-# --- 4. LÓGICA DE DATOS ---
+# --- 5. LÓGICA DE DATOS ---
 @st.cache_data(ttl=300)
 def obtener_datos():
     url = 'https://drive.google.com/uc?export=download&id=1iTKUYxsQBh42zHahtDrLfvULM1o_Qsnb'
@@ -179,177 +115,112 @@ def obtener_datos():
         r = requests.get(url)
         df = pd.read_excel(io.BytesIO(r.content), engine='openpyxl')
         df.columns = [str(c).strip().lower() for c in df.columns]
-        mapeo = {'articulo': 'producto', 'artículo': 'producto', 'codigo': 'producto', 'descripción': 'descripcion', 'descripcion': 'descripcion'}
-        df = df.rename(columns=mapeo)
-        
-        # --- EL TRUCO DE VELOCIDAD ---
-        # Convertimos a texto y limpiamos UNA SOLA VEZ en la memoria caché
+        df = df.rename(columns={'articulo': 'producto', 'artículo': 'producto', 'codigo': 'producto', 'descripción': 'descripcion'})
         df['producto'] = df['producto'].astype(str).str.strip()
-        
         return df
     except: return None
 
-@st.cache_data(ttl=3600)
-def buscar_foto(sku):
-    # Scraping rápido de foto
-    url = f"https://www.tricot.cl/{sku}.html"
-    try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=2)
-        soup = BeautifulSoup(r.text, 'html.parser')
-        tag = soup.find("meta", property="og:image")
-        if tag: return tag["content"]
-    except: pass
-    return f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
+# --- 6. INTERFAZ Y FLUJO ---
+if "estado" not in st.session_state: st.session_state.estado = "esperando"
+if "modo_manual" not in st.session_state: st.session_state.modo_manual = False
 
-def decodificar_barras(foto_st):
-    """
-    Usa el detector nativo de OpenCV (más estable en Railway)
-    """
-    try:
-        # Convertir imagen
-        img = cv2.imdecode(np.frombuffer(foto_st.read(), np.uint8), 1)
-        
-        # Nuevo detector de códigos de barras de OpenCV
-        detector = cv2.barcode.BarcodeDetector()
-        ok, decoded_info, decoded_type, _ = detector.detectAndDecode(img)
-        
-        if ok and decoded_info:
-            # Retornamos el primer código encontrado que no sea vacío
-            return decoded_info[0]
-    except Exception as e:
-        print(f"Error en decodificación: {e}")
-    return None
-
-# --- 5. INTERFAZ Y FLUJO ---
-if "estado" not in st.session_state:
-    st.session_state.estado = "esperando"
-if "modo_manual" not in st.session_state:
-    st.session_state.modo_manual = False
-
-# Pantalla de Escaneo
 if st.session_state.estado == "esperando":
-
     if not st.session_state.modo_manual:
         st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>APUNTE AL CÓDIGO DE BARRAS</h3>", unsafe_allow_html=True)
         
-        # EL ESCÁNER (dentro del if)
+        # --- REQUERIMIENTO 1 Y 2: ESCÁNER SIN CORCHETES Y SIN QR ---
         st.components.v1.html("""
-            <div id="reader" style="width:100%; border-radius:15px; overflow:hidden;"></div>
+            <style>
+                #reader-container {
+                    position: relative; width: 100%; height: 250px;
+                    border-radius: 20px; overflow: hidden;
+                    background: #000; border: 3px solid #D32F2F;
+                    margin-top: -10px;
+                }
+                /* Ocultar cualquier elemento de la interfaz de la librería (Corchetes, etc) */
+                #reader__scan_region, #reader canvas, .html5-qrcode-element, 
+                #reader__dashboard_section_csr, #reader__status_span { 
+                    display: none !important; visibility: hidden !important; opacity: 0 !important;
+                }
+                #reader video { object-fit: cover !important; height: 250px !important; width: 100% !important; }
+                
+                .laser {
+                    position: absolute; top: 50%; left: 10%; width: 80%; height: 2px;
+                    background-color: #D32F2F; box-shadow: 0 0 10px #FF0000;
+                    z-index: 100; animation: scanning 1.5s infinite;
+                }
+                @keyframes scanning { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+            </style>
+            
+            <div id="reader-container"><div class="laser"></div><div id="reader"></div></div>
+
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
-                const beep = new Audio('https://www.soundjay.com/buttons/sounds/button-37a.mp3');
-                function onScanSuccess(decodedText) {
-                    if (!isNaN(decodedText) || decodedText.length <= 13) {
-                        const input = window.parent.document.querySelector('input[placeholder="000000000"]');
-                        if (input && input.value !== decodedText) {
-                            beep.play().catch(e => console.log("Sonido", e));
-                            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                            nativeInputValueSetter.call(input, decodedText);
-                            input.dispatchEvent(new Event('input', { bubbles: true }));
-                            setTimeout(() => { input.focus(); input.blur(); }, 300);
-                        }
-                    }
-                }
-                const html5QrCode = new Html5Qrcode("reader");
-                const config = { fps: 20, qrbox: { width: 250, height: 130 }, aspectRatio: 1.777778};
-                html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess);
-            </script>
-        """, height=380) # <- CAMBIO AQUÍ: Subimos a 320 para que no recorte la parte de abajo
+                // CONFIGURACIÓN REQUERIMIENTO 2: BLOQUEAR QR (Solo permitimos códigos 1D)
+                const formats = [
+                    Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+                    Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.UPC_A
+                ];
 
-        # Ocultamos la etiqueta pero dejamos el input para recibir el dato del escáner
+                const html5QrCode = new Html5Qrcode("reader", { formatsToSupport: formats });
+                
+                // REQUERIMIENTO 1: Lector en todo el espectro (Sin qrbox)
+                const config = { fps: 30, aspectRatio: 1.0 };
+
+                html5QrCode.start({ facingMode: "environment" }, config, (decodedText) => {
+                    const input = window.parent.document.querySelector('input[placeholder="000000000"]');
+                    if (input && input.value !== decodedText) {
+                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                        nativeInputValueSetter.call(input, decodedText);
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                });
+            </script>
+        """, height=280)
+
         manual = st.text_input("DIGITE CÓDIGO", placeholder="000000000", label_visibility="collapsed")
-        
-        # Botón para ir al manual
-        st.markdown("""
-            <style>
-            div[data-testid="stButton"] > button {
-                background-color: #D32F2F !important;
-                color: #FFFFFF !important;
-                font-weight: 800 !important;
-                border-radius: 15px !important;
-                border: none !important;
-            }
-            </style>
-        """, unsafe_allow_html=True)
         if st.button("✍️ CONSULTAR MANUALMENTE", use_container_width=True):
             st.session_state.modo_manual = True
             st.rerun()
-
     else:
-        # PANTALLA MANUAL (cuando el botón se presiona)
         st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>INGRESE EL CÓDIGO MANUALMENTE</h3>", unsafe_allow_html=True)
-        
         manual = st.text_input("DIGITE CÓDIGO", placeholder="000000000")
         inyectar_auto_enter()
-        
-        # Botón para regresar a la cámara
         if st.button("📷 VOLVER AL ESCÁNER", use_container_width=True):
             st.session_state.modo_manual = False
             st.rerun()
 
-    # Lógica de búsqueda ultra rápida
     if manual:
         sku_6 = str(manual).strip()[:6]
         df = obtener_datos()
-        
         if df is not None:
-            # Búsqueda directa sin reprocesar datos
             res = df[df['producto'].str.contains(sku_6)]
-            
             if not res.empty:
-                emitir_sonido_ok() # ¡BEEP!
-                st.session_state.modo_manual = False # Resetea para que la próxima vez abra la cámara
+                emitir_sonido_ok()
+                st.session_state.modo_manual = False
                 st.session_state.p = res.iloc[0]
                 st.session_state.sku = sku_6
                 st.session_state.estado = "resultado"
                 st.rerun()
-            elif len(sku_6) >= 6:
-                st.error("Producto no encontrado.")
 
-# Pantalla de Resultado Protagónico
+# --- PANTALLA DE RESULTADO ---
 if st.session_state.estado == "resultado":
     p, sku = st.session_state.p, st.session_state.sku
-    p_act = float(p.get('precio actual', 0))
-    p_nue = float(p.get('nuevo precio', 0))
+    img_b64 = obtener_foto_bypass(sku) # Llamada a la función de bypass
     
-    if p_nue > p_act: var, cls = "🔺 EL PRECIO SUBIÓ", "up"
-    elif p_nue < p_act: var, cls = "🔻 EL PRECIO BAJÓ", "down"
-    else: var, cls = "➖ SIN CAMBIO DE PRECIO", "same"
+    p_act, p_nue = float(p.get('precio actual', 0)), float(p.get('nuevo precio', 0))
+    var, cls = ("🔻 EL PRECIO BAJÓ", "down") if p_nue < p_act else ("🔺 EL PRECIO SUBIÓ", "up") if p_nue > p_act else ("➖ SIN CAMBIO", "same")
     
     st.markdown(f"""
         <div class="product-card">
-            <img src="{buscar_foto(sku)}" class="product-img">
+            <img src="{img_b64}" class="product-img">
             <div class="product-title">{str(p.get('descripcion', 'PRODUCTO')).upper()}</div>
-            <div class="product-info">{str(p.get('departamento', 'GENERAL'))} | {str(p.get('subcategoria', 'OTROS'))}</div>
             <div class="price-value">$ {p_nue:,.0f}</div>
             <div class="trend-pill {cls}">{var}</div>
-            <div style="margin-top:20px; color:#999; font-size:12px; font-family:monospace;">SKU: {sku}</div>
+            <div style="margin-top:20px; color:#999; font-size:12px;">SKU: {sku}</div>
         </div>
     """.replace(',', '.'), unsafe_allow_html=True)
 
-    # --- ESTILO Y BOTÓN INFERIOR PARA MÓVIL ---
-    st.markdown("""
-        <style>
-        /* Transformar el botón nativo en un botón rojo gigante, al fondo y con espacio */
-        div[data-testid="stButton"] > button {
-            background-color: #D32F2F !important;
-            color: #FFFFFF !important;
-            font-weight: 900 !important;
-            font-size: 20px !important;
-            height: 65px !important;
-            border-radius: 15px !important;
-            border: none !important;
-            margin-top: 10px !important; /* El espacio que pediste */
-            margin-bottom: 20px !important;
-            box-shadow: 0 8px 20px rgba(211,47,47,0.3) !important;
-        }
-        div[data-testid="stButton"] > button:active {
-            background-color: #9A0007 !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
-    # El botón ahora aparecerá abajo de la tarjeta
     if st.button("🔄 CONSULTAR OTRO PRODUCTO", use_container_width=True):
         st.session_state.estado = "esperando"
         st.rerun()
