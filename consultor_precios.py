@@ -23,40 +23,49 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # EL ESCÁNER RE-CENTRADO Y OPTIMIZADO
+    # ESCÁNER CON MOTOR NATIVO Y POSICIONAMIENTO FORZADO
         st.components.v1.html("""
-            <div id="reader" style="width:100%; border-radius:15px; overflow:hidden; background-color: #000; margin-top: -20px;"></div>
+            <style>
+                /* Forzamos que el lector no tenga márgenes extraños */
+                #reader { 
+                    width: 100% !important; 
+                    border-radius: 15px !important; 
+                    overflow: hidden !important;
+                    background: black !important;
+                }
+                /* Ajuste para que el video no se desplace en iPhone */
+                #reader video {
+                    object-fit: cover !important;
+                }
+                /* Subimos visualmente los corchetes de enfoque */
+                #reader__scan_region {
+                    transform: translateY(-20px) !important;
+                }
+            </style>
+            
+            <div id="reader"></div>
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
+                const html5QrCode = new Html5Qrcode("reader");
                 const beep = new Audio('https://www.soundjay.com/buttons/sounds/button-37a.mp3');
 
                 function onScanSuccess(decodedText) {
-                    if (!isNaN(decodedText) || decodedText.length >= 8) {
-                        const input = window.parent.document.querySelector('input[placeholder="000000000"]');
-                        if (input && input.value !== decodedText) {
-                            beep.play().catch(e => console.log("Error sonido", e));
-                            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                            nativeInputValueSetter.call(input, decodedText);
-                            input.dispatchEvent(new Event('input', { bubbles: true }));
-                            setTimeout(() => { input.focus(); input.blur(); }, 200);
-                        }
+                    const input = window.parent.document.querySelector('input[placeholder="000000000"]');
+                    if (input && input.value !== decodedText) {
+                        beep.play().catch(e => {});
+                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                        nativeInputValueSetter.call(input, decodedText);
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
                     }
                 }
 
-                const html5QrCode = new Html5Qrcode("reader");
-
-                // AJUSTE DE CENTRADO DINÁMICO
                 const config = { 
-                    fps: 25, 
-                    // Esta función fuerza a los corchetes a estar siempre en el centro matemático
-                    qrbox: (viewfinderWidth, viewfinderHeight) => {
-                        let width = viewfinderWidth * 0.75;
-                        let height = viewfinderHeight * 0.5;
-                        if (width > 300) width = 300;
-                        if (height > 180) height = 180;
-                        return { width: width, height: height };
+                    fps: 20, 
+                    qrbox: { width: 260, height: 160 }, // Tamaño fijo y centrado
+                    aspectRatio: 1.0, // Cuadrado perfecto ayuda al centrado en iOS
+                    experimentalFeatures: {
+                        useBarCodeDetectorIfSupported: true // VITAL: Usa el motor de Apple si está disponible
                     },
-                    aspectRatio: 1.333333, // Cambiamos a 4:3 que es más estable para el centrado en iOS
                     videoConstraints: {
                         facingMode: "environment",
                         width: { ideal: 1280 },
@@ -64,15 +73,17 @@ def inyectar_auto_enter():
                     }
                 };
 
+                // El retraso de 600ms ayuda a Safari a calcular bien el tamaño de la pantalla
                 setTimeout(() => {
                     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
                     .catch(err => {
-                        console.warn("Reintentando cámara...", err);
-                        html5QrCode.start({ facingMode: "user" }, config, onScanSuccess);
+                        console.error(err);
+                        // Plan B: Si falla, inicia sin restricciones de resolución
+                        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess);
                     });
-                }, 500);
+                }, 600);
             </script>
-        """, height=350) # Bajamos el height de 450 a 350 para que todo el bloque suba
+        """, height=320) # Reducimos la altura para "empujar" el visor hacia arriba
 
 # --- 3. ESTILOS CSS (Diseño Protagónico) ---
 st.markdown("""
