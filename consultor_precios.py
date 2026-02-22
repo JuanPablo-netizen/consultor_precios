@@ -23,7 +23,7 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # ESCÁNER FULL-FRAME: SOLO CÓDIGOS DE BARRA (QR DESACTIVADO)
+    # ESCÁNER LÍMPIO: SIN CORCHETES Y CON QR INHABILITADO
         st.components.v1.html("""
             <style>
                 #reader-container {
@@ -34,7 +34,7 @@ def inyectar_auto_enter():
                     overflow: hidden;
                     background: #000;
                     border: 3px solid #D32F2F;
-                    margin-top: -55px; /* Sube el escáner para centrarlo en Android */
+                    margin-top: -50px; /* Sube el visor en Android */
                 }
                 #reader { width: 100% !important; }
                 #reader video { 
@@ -42,21 +42,21 @@ def inyectar_auto_enter():
                     height: 250px !important; 
                 }
                 
-                /* LÍNEA LÁSER GUÍA */
+                /* LÍNEA LÁSER ESTÉTICA (Sustituye a los corchetes como guía) */
                 .laser {
                     position: absolute;
                     top: 50%;
-                    left: 5%;
-                    width: 90%;
+                    left: 10%;
+                    width: 80%;
                     height: 2px;
                     background-color: #D32F2F;
-                    box-shadow: 0 0 12px #FF0000;
+                    box-shadow: 0 0 10px #FF0000;
                     z-index: 10;
-                    animation: scanning 1.5s infinite;
+                    animation: scanning 2s infinite;
                 }
                 @keyframes scanning {
-                    0%, 100% { opacity: 0.4; transform: translateY(-2px); }
-                    50% { opacity: 1; transform: translateY(2px); }
+                    0%, 100% { opacity: 0.3; }
+                    50% { opacity: 1; }
                 }
             </style>
             
@@ -67,8 +67,8 @@ def inyectar_auto_enter():
 
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
-                // Definimos los formatos permitidos (Solo 1D / Barcodes)
-                // Esto deshabilita automáticamente el QR
+                // 1. CONFIGURACIÓN: SOLO CÓDIGOS 1D (CÓDIGOS DE BARRA)
+                // Esto deja inhabilitado el QR automáticamente
                 const formatsToSupport = [
                     Html5QrcodeSupportedFormats.EAN_13,
                     Html5QrcodeSupportedFormats.EAN_8,
@@ -80,8 +80,7 @@ def inyectar_auto_enter():
                 ];
 
                 const html5QrCode = new Html5Qrcode("reader", { 
-                    formatsToSupport: formatsToSupport,
-                    verbose: false 
+                    formatsToSupport: formatsToSupport 
                 });
                 
                 const beep = new Audio('https://www.soundjay.com/buttons/sounds/button-37a.mp3');
@@ -96,9 +95,13 @@ def inyectar_auto_enter():
                     }
                 }
 
+                // 2. INICIO SIN QRBOX (SIN CORCHETES)
                 const config = { 
                     fps: 30,
                     aspectRatio: 1.0,
+                    experimentalFeatures: {
+                        useBarCodeDetectorIfSupported: true // Ayuda mucho al iPhone
+                    },
                     videoConstraints: {
                         facingMode: "environment",
                         width: { ideal: 1280 },
