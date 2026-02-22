@@ -23,7 +23,7 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # ESCÁNER PURIFICADO: SIN CORCHETES (OCULTOS POR FUERZA) Y SIN QR
+    # ESCÁNER PURIFICADO: ELIMINACIÓN POR SCRIPT Y BLOQUEO DE QR
         st.components.v1.html("""
             <style>
                 #reader-container {
@@ -37,25 +37,19 @@ def inyectar_auto_enter():
                     margin-top: -55px;
                 }
                 #reader { width: 100% !important; border: none !important; }
-                #reader video { 
-                    object-fit: cover !important; 
-                    height: 250px !important; 
-                }
+                #reader video { object-fit: cover !important; height: 250px !important; }
 
-                /* --- EXTERMINADOR DE CORCHETES Y UI --- */
-                /* Ocultamos absolutamente toda la capa de dibujo de la librería */
+                /* --- NUEVA ESTRATEGIA: OCULTAR TODO LO QUE NO SEA VIDEO --- */
                 #reader__scan_region, 
                 #reader__scan_region svg, 
                 #reader__scan_region div,
-                .html5-qrcode-element,
                 #reader__dashboard_section_csr,
-                #reader__status_span { 
+                #reader__status_span,
+                div[style*="border"] { 
                     display: none !important; 
-                    opacity: 0 !important; 
-                    visibility: hidden !important;
+                    border: none !important;
                 }
-                
-                /* LÍNEA LÁSER (Guía minimalista) */
+
                 .laser {
                     position: absolute;
                     top: 50%;
@@ -64,7 +58,7 @@ def inyectar_auto_enter():
                     height: 2px;
                     background-color: #D32F2F;
                     box-shadow: 0 0 10px #FF0000;
-                    z-index: 10;
+                    z-index: 100;
                     animation: scanning 2s infinite;
                 }
                 @keyframes scanning {
@@ -85,32 +79,26 @@ def inyectar_auto_enter():
                     Html5QrcodeSupportedFormats.EAN_13,
                     Html5QrcodeSupportedFormats.EAN_8,
                     Html5QrcodeSupportedFormats.CODE_128,
-                    Html5QrcodeSupportedFormats.CODE_39,
-                    Html5QrcodeSupportedFormats.UPC_A,
-                    Html5QrcodeSupportedFormats.ITF
+                    Html5QrcodeSupportedFormats.UPC_A
                 ];
 
                 const html5QrCode = new Html5Qrcode("reader", { 
-                    formatsToSupport: formatsToSupport,
-                    verbose: false 
+                    formatsToSupport: formatsToSupport 
                 });
                 
-                const beep = new Audio('https://www.soundjay.com/buttons/sounds/button-37a.mp3');
-
                 function onScanSuccess(decodedText) {
                     const input = window.parent.document.querySelector('input[placeholder="000000000"]');
                     if (input && input.value !== decodedText) {
-                        beep.play().catch(e => {});
                         const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                         nativeInputValueSetter.call(input, decodedText);
                         input.dispatchEvent(new Event('input', { bubbles: true }));
                     }
                 }
 
-                // 2. CONFIGURACIÓN SIN QRBOX (PARA EVITAR QUE SE GENEREN)
+                // 2. CONFIGURACIÓN SIN QRBOX (PARA QUE NO SE GENEREN CORCHETES)
                 const config = { 
                     fps: 30,
-                    aspectRatio: 1.0, // Mantenemos 1.0 para centrado perfecto
+                    aspectRatio: 1.0,
                     videoConstraints: {
                         facingMode: "environment",
                         width: { ideal: 1280 },
@@ -118,12 +106,24 @@ def inyectar_auto_enter():
                     }
                 };
 
-                setTimeout(() => {
-                    html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
-                    .catch(err => {
-                        html5QrCode.start({ facingMode: "environment" }, { fps: 20 }, onScanSuccess);
-                    });
-                }, 500);
+                // --- LA SOLUCIÓN MAESTRA ---
+                // Iniciamos y LUEGO borramos lo que la librería cree
+                html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+                .then(() => {
+                    // Esperamos un momento a que los corchetes aparezcan para borrarlos
+                    setTimeout(() => {
+                        const region = document.getElementById('reader__scan_region');
+                        if (region) {
+                            region.style.display = 'none';
+                            // Borramos cualquier borde interno que la librería dibuje con JS
+                            const borders = region.querySelectorAll('div');
+                            borders.forEach(b => b.style.display = 'none');
+                        }
+                    }, 500);
+                })
+                .catch(err => {
+                    html5QrCode.start({ facingMode: "environment" }, { fps: 20 }, onScanSuccess);
+                });
             </script>
         """, height=280)
 
