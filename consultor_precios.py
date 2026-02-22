@@ -1,3 +1,18 @@
+import os
+import ctypes
+import subprocess
+
+# --- TRUCO PARA RAILWAY: Localizar libzbar manualmente ---
+try:
+    # Intentamos encontrar la ruta de la librería en el sistema Linux de Railway
+    find_zbar = subprocess.check_output(["find", "/usr/lib", "/usr/local/lib", "-name", "libzbar.so*"], stderr=subprocess.DEVNULL)
+    if find_zbar:
+        zbar_lib_path = find_zbar.decode().split('\n')[0].strip()
+        os.environ["LD_LIBRARY_PATH"] = os.path.dirname(zbar_lib_path) + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+        ctypes.cdll.LoadLibrary(zbar_lib_path)
+except Exception:
+    pass
+
 import streamlit as st
 import pandas as pd
 import requests
