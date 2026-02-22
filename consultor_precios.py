@@ -23,25 +23,63 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # JavaScript para detectar 9 dígitos y procesar automáticamente
-    st.components.v1.html(
-        """
-        <script>
-        const input = window.parent.document.querySelector('input[placeholder="000000000"]');
-        if (input) {
-            input.addEventListener('input', function() {
-                if (this.value.length >= 9) {
-                    const event = new KeyboardEvent('keydown', {
-                        key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true
-                    });
-                    input.dispatchEvent(event);
+    # EL ESCÁNER OPTIMIZADO PARA IPHONE Y ANDROID
+        st.components.v1.html("""
+            <div id="reader" style="width:100%; border-radius:15px; overflow:hidden; background-color: #000;"></div>
+            <script src="https://unpkg.com/html5-qrcode"></script>
+            <script>
+                const beep = new Audio('https://www.soundjay.com/buttons/sounds/button-37a.mp3');
+
+                function onScanSuccess(decodedText) {
+                    // Validamos que parezca un código de barras (solo números o longitud típica)
+                    if (!isNaN(decodedText) || decodedText.length >= 8) {
+                        const input = window.parent.document.querySelector('input[placeholder="000000000"]');
+                        // Solo procesamos si el input está vacío o es diferente para evitar bucles
+                        if (input && input.value !== decodedText) {
+                            beep.play().catch(e => console.log("Error sonido", e));
+                            
+                            // Truco para forzar la escritura en el input de Streamlit
+                            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                            nativeInputValueSetter.call(input, decodedText);
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            
+                            // Pequeño delay para asegurar el foco
+                            setTimeout(() => { input.focus(); input.blur(); }, 200);
+                        }
+                    }
                 }
-            });
-        }
-        </script>
-        """,
-        height=0,
-    )
+
+                const html5QrCode = new Html5Qrcode("reader");
+
+                // --- CAMBIOS ESPECÍFICOS AQUÍ ---
+                const config = { 
+                    fps: 25, // Subimos un poco los cuadros por segundo para fluidez
+                    qrbox: { width: 280, height: 150 }, // Caja un poco más ancha
+                    aspectRatio: 1.777778, // VITAL PARA IPHONE: Usar ratio panorámico (16:9)
+                    videoConstraints: {
+                        facingMode: "environment", // Cámara trasera
+                        width: { ideal: 1280 },    // Pedimos resolución HD para nitidez
+                        height: { ideal: 720 },
+                        focusMode: "continuous"    // Intento de enfoque continuo
+                    }
+                };
+
+                // --- INICIO CON RETRASO PARA SAFARI ---
+                // Damos 800ms para que el iPhone estabilice la cámara antes de empezar a leer
+                setTimeout(() => {
+                    html5QrCode.start(
+                        { facingMode: "environment" }, 
+                        config, 
+                        onScanSuccess
+                    ).catch(err => {
+                        // Si falla la cámara trasera, intenta con la configuración por defecto
+                        console.warn("Error en cámara trasera, reintentando...", err);
+                        html5QrCode.start({ facingMode: "user" }, config, onScanSuccess);
+                    });
+                }, 800);
+
+            </script>
+        """, height=450) # <- Aumentamos un poco la altura del contenedor
 
 # --- 3. ESTILOS CSS (Diseño Protagónico) ---
 st.markdown("""
@@ -179,7 +217,7 @@ if st.session_state.estado == "esperando":
                     }
                 }
                 const html5QrCode = new Html5Qrcode("reader");
-                const config = { fps: 20, qrbox: { width: 250, height: 130 }, aspectRatio: 1.0 };
+                const config = { fps: 20, qrbox: { width: 250, height: 130 }, aspectRatio: 1.777778};
                 html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess);
             </script>
         """, height=380) # <- CAMBIO AQUÍ: Subimos a 320 para que no recorte la parte de abajo
