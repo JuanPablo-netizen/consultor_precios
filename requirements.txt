@@ -1,0 +1,8 @@
+streamlit
+pandas
+openpyxl
+requests
+beautifulsoup4
+pyzbar
+opencv-python-headless
+numpy
