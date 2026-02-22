@@ -1,7 +1,7 @@
 [phases.setup]
 nixPkgs = ["python311", "zbar", "libglvnd"]
 
-[phases.build]
+[phases.install]
 cmds = ["pip install -r requirements.txt"]
 
 [start]
