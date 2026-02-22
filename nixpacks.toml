@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["zbar", "libglvnd"]
+nixPkgs = ["python311", "zbar", "libglvnd"]
 
-[start]
-cmd = "streamlit run consultor_precios.py --server.port $PORT --server.address 0.0.0.0"
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
