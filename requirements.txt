@@ -3,6 +3,5 @@ pandas
 openpyxl
 requests
 beautifulsoup4
-pyzbar
-opencv-python-headless
+opencv-contrib-python-headless
 numpy
