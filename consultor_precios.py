@@ -34,7 +34,7 @@ def inyectar_auto_enter():
             input.addEventListener('input', function() {
                 if (this.value.length >= 9) {
                     const event = new KeyboardEvent('keydown', {
-                        key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true
+                        key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
                     });
                     input.dispatchEvent(event);
                 }
@@ -120,7 +120,7 @@ if st.session_state.estado == "esperando":
     if not st.session_state.modo_manual:
         st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>APUNTE AL CÓDIGO DE BARRAS</h3>", unsafe_allow_html=True)
         
-        # ESCÁNER FULL-FRAME (SIN CORCHETES / BLOQUEO QR)
+        # ESCÁNER FULL-FRAME (SIN CORCHETES / BLOQUEO QR / AUTO-ENTER)
         st.components.v1.html("""
             <style>
                 #reader-container { position: relative; width: 100%; height: 250px; border-radius: 20px; overflow: hidden; background: #000; border: 3px solid #D32F2F; margin-top: -10px; }
@@ -138,17 +138,25 @@ if st.session_state.estado == "esperando":
                 html5QrCode.start({ facingMode: "environment" }, { fps: 30, aspectRatio: 1.0 }, (txt) => {
                     const input = window.parent.document.querySelector('input[placeholder="000000000"]');
                     if (input && input.value !== txt) {
+                        // 1. Inyectamos el valor directamente en el prototipo para que React/Streamlit lo detecten
                         const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                         setter.call(input, txt);
+                        
+                        // 2. Disparamos eventos de cambio
                         input.dispatchEvent(new Event('input', { bubbles: true }));
-                        // El evento 'input' dispara la lógica de búsqueda en Python automáticamente
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        
+                        // 3. MODIFICACIÓN: Disparamos el Enter físico para gatillar la búsqueda
+                        const enterEvent = new KeyboardEvent('keydown', {
+                            key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
+                        });
+                        input.dispatchEvent(enterEvent);
                     }
                 });
             </script>
         """, height=280)
 
         manual = st.text_input("DIGITE CÓDIGO", placeholder="000000000", label_visibility="collapsed")
-        # Inyectamos el auto-enter también aquí por si se usa teclado físico o pegado de texto
         inyectar_auto_enter()
         
         if st.button("✍️ CONSULTAR MANUALMENTE", use_container_width=True):
@@ -157,7 +165,7 @@ if st.session_state.estado == "esperando":
     else:
         st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>INGRESE EL CÓDIGO MANUALMENTE</h3>", unsafe_allow_html=True)
         manual = st.text_input("DIGITE CÓDIGO", placeholder="000000000")
-        inyectar_auto_enter() # VITAL: Auto-enter para 9 dígitos
+        inyectar_auto_enter()
         
         if st.button("📷 VOLVER AL ESCÁNER", use_container_width=True):
             st.session_state.modo_manual = False
@@ -179,7 +187,7 @@ if st.session_state.estado == "esperando":
 # --- PANTALLA DE RESULTADO ---
 if st.session_state.estado == "resultado":
     p, sku = st.session_state.p, st.session_state.sku
-    img_b64 = obtener_foto_bypass(sku) # BYPASS DE FOTOS OK
+    img_b64 = obtener_foto_bypass(sku)
     
     p_act, p_nue = float(p.get('precio actual', 0)), float(p.get('nuevo precio', 0))
     var, cls = ("🔻 EL PRECIO BAJÓ", "down") if p_nue < p_act else ("🔺 EL PRECIO SUBIÓ", "up") if p_nue > p_act else ("➖ SIN CAMBIO", "same")
