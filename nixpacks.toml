@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["zbar", "libglvnd", "python311"]
+nixPkgs = ["python311", "libglvnd", "glib"]
 
 [start]
 cmd = "streamlit run consultor_precios.py --server.port $PORT --server.address 0.0.0.0"

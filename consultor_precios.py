@@ -1,18 +1,3 @@
-import os
-import ctypes
-import subprocess
-
-# --- TRUCO PARA RAILWAY: Localizar libzbar manualmente ---
-try:
-    # Intentamos encontrar la ruta de la librería en el sistema Linux de Railway
-    find_zbar = subprocess.check_output(["find", "/usr/lib", "/usr/local/lib", "-name", "libzbar.so*"], stderr=subprocess.DEVNULL)
-    if find_zbar:
-        zbar_lib_path = find_zbar.decode().split('\n')[0].strip()
-        os.environ["LD_LIBRARY_PATH"] = os.path.dirname(zbar_lib_path) + ":" + os.environ.get("LD_LIBRARY_PATH", "")
-        ctypes.cdll.LoadLibrary(zbar_lib_path)
-except Exception:
-    pass
-
 import streamlit as st
 import pandas as pd
 import requests
@@ -146,13 +131,22 @@ def buscar_foto(sku):
     return f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
 
 def decodificar_barras(foto_st):
-    # Motor de lectura con bloqueo de QR
+    """
+    Usa el detector nativo de OpenCV (más estable en Railway)
+    """
     try:
+        # Convertir imagen
         img = cv2.imdecode(np.frombuffer(foto_st.read(), np.uint8), 1)
-        for c in pyzbar.decode(img):
-            if c.type != 'QRCODE': # BLOQUEO DE QR CUMPLIDO
-                return c.data.decode('utf-8')
-    except: pass
+        
+        # Nuevo detector de códigos de barras de OpenCV
+        detector = cv2.barcode.BarcodeDetector()
+        ok, decoded_info, decoded_type, _ = detector.detectAndDecode(img)
+        
+        if ok and decoded_info:
+            # Retornamos el primer código encontrado que no sea vacío
+            return decoded_info[0]
+    except Exception as e:
+        print(f"Error en decodificación: {e}")
     return None
 
 # --- 5. INTERFAZ Y FLUJO ---
