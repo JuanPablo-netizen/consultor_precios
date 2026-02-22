@@ -4,7 +4,7 @@ import requests
 import io
 import numpy as np
 import cv2
-import base64  # Nuevo: para el bypass de imágenes
+import base64
 from bs4 import BeautifulSoup
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
@@ -23,6 +23,9 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
+    """
+    JavaScript para detectar 9 dígitos en el modo manual y procesar automáticamente.
+    """
     st.components.v1.html(
         """
         <script>
@@ -42,37 +45,26 @@ def inyectar_auto_enter():
         height=0,
     )
 
-# --- 3. LÓGICA DE IMÁGENES (REQUERIMIENTO 3: BYPASS DE BLOQUEO) ---
+# --- 3. LÓGICA DE IMÁGENES (BYPASS UNIVERSAL) ---
 @st.cache_data(ttl=3600)
 def obtener_foto_bypass(sku):
-    """
-    Descarga la foto desde el servidor para evitar bloqueos de 'Hotlinking' en navegadores.
-    Convierte la imagen a Base64 para inyectarla directo al HTML.
-    """
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    # URL base de Tricot
     img_url = f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
     
     try:
-        # Descargamos la imagen desde el backend (Railway)
         img_res = requests.get(img_url, headers=headers, timeout=3)
-        
-        # Si la imagen por defecto no existe, intentamos buscar la real en el HTML del producto
         if img_res.status_code != 200:
             prod_url = f"https://www.tricot.cl/{sku}.html"
             r = requests.get(prod_url, headers=headers, timeout=2)
             soup = BeautifulSoup(r.text, 'html.parser')
             tag = soup.find("meta", property="og:image")
-            if tag: 
-                img_res = requests.get(tag["content"], headers=headers, timeout=2)
+            if tag: img_res = requests.get(tag["content"], headers=headers, timeout=2)
 
         if img_res.status_code == 200:
             encoded = base64.b64encode(img_res.content).decode()
             return f"data:image/jpeg;base64,{encoded}"
     except:
         pass
-    
-    # Placeholder si no se encuentra nada
     return "https://via.placeholder.com/400x400.png?text=Imagen+No+Disponible"
 
 # --- 4. ESTILOS CSS ---
@@ -86,8 +78,8 @@ st.markdown("""
         margin: 0 auto; text-align: center; border: 1px solid #F1F5F9;
     }
     .product-img { width: 100%; max-width: 280px; height: auto; border-radius: 20px; margin-bottom: 20px; }
-    .product-title { font-size: 26px; font-weight: 900; color: #111; line-height: 1.1; text-transform: uppercase; }
-    .price-value { font-size: 70px; font-weight: 950; color: #D32F2F; margin-bottom: 10px; letter-spacing: -2px; line-height: 1; }
+    .product-title { font-size: 26px; font-weight: 900; color: #111; text-transform: uppercase; }
+    .price-value { font-size: 70px; font-weight: 950; color: #D32F2F; margin-bottom: 10px; line-height: 1; }
     .trend-pill { display: inline-flex; align-items: center; padding: 10px 25px; border-radius: 15px; font-size: 18px; font-weight: 800; }
     .up { background-color: #FFEBEE; color: #D32F2F; }
     .down { background-color: #E8F5E9; color: #2E7D32; }
@@ -128,64 +120,45 @@ if st.session_state.estado == "esperando":
     if not st.session_state.modo_manual:
         st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>APUNTE AL CÓDIGO DE BARRAS</h3>", unsafe_allow_html=True)
         
-        # --- REQUERIMIENTO 1 Y 2: ESCÁNER SIN CORCHETES Y SIN QR ---
+        # ESCÁNER FULL-FRAME (SIN CORCHETES / BLOQUEO QR)
         st.components.v1.html("""
             <style>
-                #reader-container {
-                    position: relative; width: 100%; height: 250px;
-                    border-radius: 20px; overflow: hidden;
-                    background: #000; border: 3px solid #D32F2F;
-                    margin-top: -10px;
-                }
-                /* Ocultar cualquier elemento de la interfaz de la librería (Corchetes, etc) */
-                #reader__scan_region, #reader canvas, .html5-qrcode-element, 
-                #reader__dashboard_section_csr, #reader__status_span { 
-                    display: none !important; visibility: hidden !important; opacity: 0 !important;
-                }
+                #reader-container { position: relative; width: 100%; height: 250px; border-radius: 20px; overflow: hidden; background: #000; border: 3px solid #D32F2F; margin-top: -10px; }
+                #reader__scan_region, #reader canvas, .html5-qrcode-element, #reader__status_span { display: none !important; }
                 #reader video { object-fit: cover !important; height: 250px !important; width: 100% !important; }
-                
-                .laser {
-                    position: absolute; top: 50%; left: 10%; width: 80%; height: 2px;
-                    background-color: #D32F2F; box-shadow: 0 0 10px #FF0000;
-                    z-index: 100; animation: scanning 1.5s infinite;
-                }
-                @keyframes scanning { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+                .laser { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: #D32F2F; box-shadow: 0 0 10px #F00; z-index: 100; animation: scan 1.5s infinite; }
+                @keyframes scan { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
             </style>
-            
             <div id="reader-container"><div class="laser"></div><div id="reader"></div></div>
-
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
-                // CONFIGURACIÓN REQUERIMIENTO 2: BLOQUEAR QR (Solo permitimos códigos 1D)
-                const formats = [
-                    Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-                    Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.UPC_A
-                ];
-
+                const formats = [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.UPC_A];
                 const html5QrCode = new Html5Qrcode("reader", { formatsToSupport: formats });
                 
-                // REQUERIMIENTO 1: Lector en todo el espectro (Sin qrbox)
-                const config = { fps: 30, aspectRatio: 1.0 };
-
-                html5QrCode.start({ facingMode: "environment" }, config, (decodedText) => {
+                html5QrCode.start({ facingMode: "environment" }, { fps: 30, aspectRatio: 1.0 }, (txt) => {
                     const input = window.parent.document.querySelector('input[placeholder="000000000"]');
-                    if (input && input.value !== decodedText) {
-                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                        nativeInputValueSetter.call(input, decodedText);
+                    if (input && input.value !== txt) {
+                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                        setter.call(input, txt);
                         input.dispatchEvent(new Event('input', { bubbles: true }));
+                        // El evento 'input' dispara la lógica de búsqueda en Python automáticamente
                     }
                 });
             </script>
         """, height=280)
 
         manual = st.text_input("DIGITE CÓDIGO", placeholder="000000000", label_visibility="collapsed")
+        # Inyectamos el auto-enter también aquí por si se usa teclado físico o pegado de texto
+        inyectar_auto_enter()
+        
         if st.button("✍️ CONSULTAR MANUALMENTE", use_container_width=True):
             st.session_state.modo_manual = True
             st.rerun()
     else:
         st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>INGRESE EL CÓDIGO MANUALMENTE</h3>", unsafe_allow_html=True)
         manual = st.text_input("DIGITE CÓDIGO", placeholder="000000000")
-        inyectar_auto_enter()
+        inyectar_auto_enter() # VITAL: Auto-enter para 9 dígitos
+        
         if st.button("📷 VOLVER AL ESCÁNER", use_container_width=True):
             st.session_state.modo_manual = False
             st.rerun()
@@ -206,7 +179,7 @@ if st.session_state.estado == "esperando":
 # --- PANTALLA DE RESULTADO ---
 if st.session_state.estado == "resultado":
     p, sku = st.session_state.p, st.session_state.sku
-    img_b64 = obtener_foto_bypass(sku) # Llamada a la función de bypass
+    img_b64 = obtener_foto_bypass(sku) # BYPASS DE FOTOS OK
     
     p_act, p_nue = float(p.get('precio actual', 0)), float(p.get('nuevo precio', 0))
     var, cls = ("🔻 EL PRECIO BAJÓ", "down") if p_nue < p_act else ("🔺 EL PRECIO SUBIÓ", "up") if p_nue > p_act else ("➖ SIN CAMBIO", "same")
