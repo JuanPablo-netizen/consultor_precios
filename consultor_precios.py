@@ -4,7 +4,6 @@ import requests
 import io
 import numpy as np
 import cv2
-from pyzbar import pyzbar
 from bs4 import BeautifulSoup
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
