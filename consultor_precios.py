@@ -23,7 +23,7 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    # ESCÁNER LÍMPIO: CORCHETES ELIMINADOS POR CSS Y QR BLOQUEADO
+    # ESCÁNER PURIFICADO: SIN CORCHETES (OCULTOS POR FUERZA) Y SIN QR
         st.components.v1.html("""
             <style>
                 #reader-container {
@@ -34,22 +34,28 @@ def inyectar_auto_enter():
                     overflow: hidden;
                     background: #000;
                     border: 3px solid #D32F2F;
-                    margin-top: -50px;
+                    margin-top: -55px;
                 }
-                #reader { width: 100% !important; }
+                #reader { width: 100% !important; border: none !important; }
                 #reader video { 
                     object-fit: cover !important; 
                     height: 250px !important; 
                 }
 
-                /* --- LA SOLUCIÓN DEFINITIVA PARA LOS CORCHETES --- */
-                /* Ocultamos la región de escaneo, los bordes y cualquier dibujo de la librería */
-                #reader__scan_region { display: none !important; }
-                #reader__scan_region svg { display: none !important; }
-                #reader__dashboard_section_csr { display: none !important; }
-                #reader__status_span { display: none !important; }
+                /* --- EXTERMINADOR DE CORCHETES Y UI --- */
+                /* Ocultamos absolutamente toda la capa de dibujo de la librería */
+                #reader__scan_region, 
+                #reader__scan_region svg, 
+                #reader__scan_region div,
+                .html5-qrcode-element,
+                #reader__dashboard_section_csr,
+                #reader__status_span { 
+                    display: none !important; 
+                    opacity: 0 !important; 
+                    visibility: hidden !important;
+                }
                 
-                /* LÍNEA LÁSER (Única guía visual permitida) */
+                /* LÍNEA LÁSER (Guía minimalista) */
                 .laser {
                     position: absolute;
                     top: 50%;
@@ -74,19 +80,19 @@ def inyectar_auto_enter():
 
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
-                // 1. SOLO CÓDIGOS 1D (CÓDIGOS DE BARRA) - ESTO MATA EL QR
+                // 1. SOLO BARCODES (BLOQUEO DE QR)
                 const formatsToSupport = [
                     Html5QrcodeSupportedFormats.EAN_13,
                     Html5QrcodeSupportedFormats.EAN_8,
                     Html5QrcodeSupportedFormats.CODE_128,
                     Html5QrcodeSupportedFormats.CODE_39,
                     Html5QrcodeSupportedFormats.UPC_A,
-                    Html5QrcodeSupportedFormats.UPC_E,
                     Html5QrcodeSupportedFormats.ITF
                 ];
 
                 const html5QrCode = new Html5Qrcode("reader", { 
-                    formatsToSupport: formatsToSupport 
+                    formatsToSupport: formatsToSupport,
+                    verbose: false 
                 });
                 
                 const beep = new Audio('https://www.soundjay.com/buttons/sounds/button-37a.mp3');
@@ -101,13 +107,10 @@ def inyectar_auto_enter():
                     }
                 }
 
-                // 2. CONFIGURACIÓN SIN QRBOX (PARA QUE NO DIBUJE NADA)
+                // 2. CONFIGURACIÓN SIN QRBOX (PARA EVITAR QUE SE GENEREN)
                 const config = { 
                     fps: 30,
-                    aspectRatio: 1.0,
-                    experimentalFeatures: {
-                        useBarCodeDetectorIfSupported: true
-                    },
+                    aspectRatio: 1.0, // Mantenemos 1.0 para centrado perfecto
                     videoConstraints: {
                         facingMode: "environment",
                         width: { ideal: 1280 },
