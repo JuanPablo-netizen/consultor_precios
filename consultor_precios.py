@@ -220,28 +220,23 @@ if st.session_state.estado == "resultado":
     # 4. RESCATE DE CÓDIGO 9 DÍGITOS
     codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
 
-    # 5. HTML ALINEADO A LA IZQUIERDA (Con enlace directo en la imagen)
+    # 5. HTML ALINEADO A LA IZQUIERDA (CERO ESPACIOS REAL)
     tarjeta_html = f"""
 <div class="product-card">
-    <a href="{img_url}" target="_blank" style="text-decoration: none;">
-        <img src="{img_url}" class="product-img" onerror="this.onerror=null; this.src='{img_fallback}';" style="cursor: pointer; border: 2px solid #E2E8F0;">
-    </a>
-    
-    <div class="product-title">{str(p.get('descripcion', 'PRODUCTO')).upper()}</div>
-    
-    <div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">
-        {str(p.get('departamento', 'SIN DEPTO'))} | {str(p.get('subcategoria', 'SIN CATEGORÍA'))}
-    </div>
-    
-    <div class="price-value">$ {p_nue:,.0f}</div>
-    <div class="trend-pill {cls}">{var}</div>
-    
-    {html_obs}
-    
-    <div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">
-        {codigo_9}
-    </div>
-    <div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div>
+<a href="{img_url}" target="_blank" style="text-decoration: none;">
+<img src="{img_url}" class="product-img" onerror="this.onerror=null; this.src='{img_fallback}';" style="cursor: pointer; border: 2px solid #E2E8F0;">
+</a>
+<div class="product-title">{str(p.get('descripcion', 'PRODUCTO')).upper()}</div>
+<div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">
+{str(p.get('departamento', 'SIN DEPTO'))} | {str(p.get('subcategoria', 'SIN CATEGORÍA'))}
+</div>
+<div class="price-value">$ {p_nue:,.0f}</div>
+<div class="trend-pill {cls}">{var}</div>
+{html_obs}
+<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">
+{codigo_9}
+</div>
+<div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div>
 </div>
 """
     
