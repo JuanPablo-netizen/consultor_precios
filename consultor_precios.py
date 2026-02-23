@@ -134,14 +134,16 @@ if st.session_state.estado == "esperando":
                     experimentalFeatures: { useBarCodeDetectorIfSupported: true } 
                 });
                 
-                // Resolución forzada y CÁMARA TRASERA ASEGURADA
+                // PARCHE iOS: Intentar forzar autofocus y mejorar el campo de visión
                 const config = { 
                     fps: 30, 
-                    aspectRatio: 1.0, 
+                    // Quitamos aspectRatio: 1.0 para que el iPhone use todo el sensor sin recortar
                     videoConstraints: { 
-                        facingMode: "environment", // Fuerza cámara principal (trasera)
-                        width: { ideal: 1280 }, 
-                        height: { ideal: 720 } 
+                        facingMode: "environment",
+                        width: { ideal: 1920 }, // Subimos a Full HD para compensar la falta de enfoque
+                        height: { ideal: 1080 },
+                        // Truco para pedirle a Safari que intente enfocar automáticamente
+                        advanced: [{ focusMode: "continuous" }] 
                     } 
                 };
                 
