@@ -122,7 +122,7 @@ if st.session_state.estado == "esperando":
             <style>
                 #reader-container { position: relative; width: 100%; height: 260px; border-radius: 20px; overflow: hidden; background: #000; border: 3px solid #D32F2F; margin-top: -10px; }
                 #reader__scan_region, #reader canvas, .html5-qrcode-element, #reader__status_span { display: none !important; }
-                #reader video { object-fit: cover !important; height: 260px !important; width: 100% !important; }
+                #reader video { object-fit: cover !important; height: 260px !important; width: 100% !important; transform: scaleX(1) !important; }
                 .laser { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: #D32F2F; box-shadow: 0 0 10px #F00; z-index: 100; animation: scan 1.5s infinite; }
                 @keyframes scan { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
             </style>
@@ -137,8 +137,16 @@ if st.session_state.estado == "esperando":
                     experimentalFeatures: { useBarCodeDetectorIfSupported: true } 
                 });
                 
-                // Resolución forzada para mejorar nitidez en iPhone
-                const config = { fps: 30, aspectRatio: 1.0, videoConstraints: { width: { ideal: 1280 }, height: { ideal: 720 } } };
+                // Resolución forzada y CÁMARA TRASERA ASEGURADA
+                const config = { 
+                    fps: 30, 
+                    aspectRatio: 1.0, 
+                    videoConstraints: { 
+                        facingMode: "environment", // Fuerza cámara principal (trasera)
+                        width: { ideal: 1280 }, 
+                        height: { ideal: 720 } 
+                    } 
+                };
                 
                 scanner.start({ facingMode: "environment" }, config, (txt) => {
                     const input = window.parent.document.querySelector('input[placeholder="000000000"]');
