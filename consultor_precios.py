@@ -200,20 +200,17 @@ if st.session_state.estado == "esperando":
 if st.session_state.estado == "resultado":
     p, sku = st.session_state.p, st.session_state.sku
     
-    # 1. LA MAGIA: DOBLE PROXY GLOBAL (Para saltar a Tricot y a Safari)
-    url_base = f"www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
+    # 1. URL ORIGINAL DE LA FOTO
+    img_url = f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
     
-    # Proxy 1: Weserv (Especialista en caché de imágenes, rapidísimo)
-    proxy_1 = f"https://wsrv.nl/?url={url_base}"
-    
-    # Proxy 2: AllOrigins (Plan de respaldo infalible)
-    proxy_2 = f"https://api.allorigins.win/raw?url=https://{url_base}"
+    # Imagen de reemplazo si Tricot bloquea la vista previa
+    img_fallback = "https://via.placeholder.com/400x400/F1F5F9/64748B.png?text=%F0%9F%93%B7+TOQUE+PARA+VER+FOTO"
     
     # 2. PRECIOS Y TENDENCIA
     p_act, p_nue = float(p.get('precio actual', 0)), float(p.get('nuevo precio', 0))
     var, cls = ("🔻 EL PRECIO BAJÓ", "down") if p_nue < p_act else ("🔺 EL PRECIO SUBIÓ", "up") if p_nue > p_act else ("➖ SIN CAMBIO", "same")
     
-    # 3. OBSERVACIONES (Con mensaje de "SIN OBSERVACIONES")
+    # 3. OBSERVACIONES
     obs = str(p.get('observaciones', '')).strip()
     if obs and obs.lower() not in ['nan', 'none', 'null', '']:
         html_obs = f'<div style="margin-top: 15px; padding: 12px; background-color: #FFF3E0; border-left: 5px solid #FF9800; color: #E65100; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">⚠️ OBS: {obs.upper()}</div>'
@@ -223,21 +220,28 @@ if st.session_state.estado == "resultado":
     # 4. RESCATE DE CÓDIGO 9 DÍGITOS
     codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
 
-    # 5. HTML ALINEADO A LA IZQUIERDA
+    # 5. HTML ALINEADO A LA IZQUIERDA (Con enlace directo en la imagen)
     tarjeta_html = f"""
 <div class="product-card">
-<img src="{proxy_1}" class="product-img" onerror="this.onerror=null; this.src='{proxy_2}';">
-<div class="product-title">{str(p.get('descripcion', 'PRODUCTO')).upper()}</div>
-<div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">
-{str(p.get('departamento', 'SIN DEPTO'))} | {str(p.get('subcategoria', 'SIN CATEGORÍA'))}
-</div>
-<div class="price-value">$ {p_nue:,.0f}</div>
-<div class="trend-pill {cls}">{var}</div>
-{html_obs}
-<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">
-{codigo_9}
-</div>
-<div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div>
+    <a href="{img_url}" target="_blank" style="text-decoration: none;">
+        <img src="{img_url}" class="product-img" onerror="this.onerror=null; this.src='{img_fallback}';" style="cursor: pointer; border: 2px solid #E2E8F0;">
+    </a>
+    
+    <div class="product-title">{str(p.get('descripcion', 'PRODUCTO')).upper()}</div>
+    
+    <div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">
+        {str(p.get('departamento', 'SIN DEPTO'))} | {str(p.get('subcategoria', 'SIN CATEGORÍA'))}
+    </div>
+    
+    <div class="price-value">$ {p_nue:,.0f}</div>
+    <div class="trend-pill {cls}">{var}</div>
+    
+    {html_obs}
+    
+    <div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">
+        {codigo_9}
+    </div>
+    <div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div>
 </div>
 """
     
