@@ -30,7 +30,11 @@ def inyectar_auto_enter():
             if (input && input.value.length >= 9) {
                 clearInterval(monitor); // Detiene el monitor
                 
-                // LA JUGADA MAESTRA: Foco y Desenfoque
+                // 📳 HACE VIBRAR EL TELÉFONO (Android)
+                if (navigator.vibrate) {
+                    navigator.vibrate(200); // 200 milisegundos
+                }
+                
                 input.focus(); 
                 setTimeout(() => { 
                     input.blur(); 
@@ -43,28 +47,33 @@ def inyectar_auto_enter():
 # --- 3. LÓGICA DE IMÁGENES (BYPASS UNIVERSAL) ---
 @st.cache_data(ttl=3600)
 def obtener_foto_bypass(sku):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    img_url = f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
+    # 1. Headers avanzados (Máscara para engañar al firewall de Tricot)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": "https://www.tricot.cl/", # Le decimos que venimos de su propia página
+        "Accept-Language": "es-CL,es;q=0.9"
+    }
+    
+    url_foto = f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
     
     try:
-        res = requests.get(img_url, headers=headers, timeout=3)
+        # Intento 1: Python intenta descargarla (Aumentamos timeout a 5 segundos)
+        res = requests.get(url_foto, headers=headers, timeout=5)
         
-        if res.status_code != 200:
-            prod_url = f"https://www.tricot.cl/{sku}.html"
-            r = requests.get(prod_url, headers=headers, timeout=2)
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(r.text, 'html.parser')
-            tag = soup.find("meta", property="og:image")
-            if tag: 
-                res = requests.get(tag["content"], headers=headers, timeout=2)
-
+        # Si la encuentra y no lo bloquean, usa el Base64
         if res.status_code == 200:
             import base64
             return f"data:image/jpeg;base64,{base64.b64encode(res.content).decode()}"
-    except:
+            
+    except Exception as e:
+        print(f"Error descargando foto: {e}")
         pass
     
-    return "https://via.placeholder.com/400x400.png?text=Sin+Foto+Disponible"
+    # 2. EL PLAN B INFALIBLE: Proxy CDN de Imágenes (weserv.nl)
+    # Si Railway está bloqueado, le damos al navegador una URL que salta la restricción de Hotlinking.
+    url_sin_https = url_foto.replace("https://", "")
+    return f"https://wsrv.nl/?url={url_sin_https}&w=400&output=jpg"
 
 # --- 4. ESTILOS CSS ---
 st.markdown("""
@@ -157,11 +166,16 @@ if st.session_state.estado == "esperando":
                         setter.call(input, txt);
                         
                         input.dispatchEvent(new Event('input', { bubbles: true }));
-                        input.dispatchEvent(new Event('change', { bubbles: true }));
                         
-                        const e = new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
-                        input.dispatchEvent(e);
-                        input.blur(); // El gatillo definitivo
+                        // 📳 HACE VIBRAR EL TELÉFONO AL ESCANEAR (Android)
+                        if (navigator.vibrate) {
+                            navigator.vibrate(200); 
+                        }
+                        
+                        input.focus();
+                        setTimeout(() => {
+                            input.blur(); // Gatilla la búsqueda
+                        }, 50);
                     }
                 });
             </script>
