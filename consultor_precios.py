@@ -23,6 +23,7 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
+    """Esta función SOLO debe contener la lógica del teclado/input"""
     st.components.v1.html("""
         <script>
         const monitor = setInterval(() => {
@@ -36,69 +37,6 @@ def inyectar_auto_enter():
         }, 100);
         </script>
     """, height=0)
-    
-    # --- REEMPLAZA TU BLOQUE DE ESCÁNER POR ESTE ---
-    st.components.v1.html("""
-            <style>
-                #reader-container { 
-                    position: relative; width: 100%; height: 250px; 
-                    border-radius: 20px; overflow: hidden; 
-                    background: #000; border: 3px solid #D32F2F; 
-                    margin-top: -10px; 
-                }
-                /* ELIMINAR CORCHETES Y UI (Requerimiento 1) */
-                #reader__scan_region, #reader canvas, .html5-qrcode-element, #reader__status_span { 
-                    display: none !important; 
-                }
-                #reader video { object-fit: cover !important; height: 250px !important; width: 100% !important; }
-                
-                .laser { 
-                    position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; 
-                    background: #D32F2F; box-shadow: 0 0 10px #F00; 
-                    z-index: 100; animation: scan 1.5s infinite; 
-                }
-                @keyframes scan { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
-            </style>
-            
-            <div id="reader-container"><div class="laser"></div><div id="reader"></div></div>
-            
-            <script src="https://unpkg.com/html5-qrcode"></script>
-            <script>
-                // BLOQUEAR QR (Requerimiento 2)
-                const formats = [
-                    Html5QrcodeSupportedFormats.EAN_13, 
-                    Html5QrcodeSupportedFormats.EAN_8, 
-                    Html5QrcodeSupportedFormats.CODE_128, 
-                    Html5QrcodeSupportedFormats.UPC_A
-                ];
-                
-                const html5QrCode = new Html5Qrcode("reader", { formatsToSupport: formats });
-                
-                html5QrCode.start({ facingMode: "environment" }, { fps: 30, aspectRatio: 1.0 }, (txt) => {
-                    const input = window.parent.document.querySelector('input[placeholder="000000000"]');
-                    
-                    if (input && input.value !== txt) {
-                        // 1. FORZAR VALOR (Para que React/Streamlit lo detecten)
-                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                        setter.call(input, txt);
-                        
-                        // 2. DISPARAR EVENTOS
-                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                        input.dispatchEvent(new Event('change', { bubbles: true }));
-                        
-                        // 3. AUTO-ENTER: Simular tecla Enter
-                        const enter = new KeyboardEvent('keydown', { 
-                            key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true 
-                        });
-                        input.dispatchEvent(enter);
-
-                        // 4. EL TRUCO DEFINITIVO: Quitar el foco (Blur)
-                        // Streamlit ejecuta el código de Python inmediatamente al perder el foco
-                        input.blur();
-                    }
-                });
-            </script>
-        """, height=280)
 
 # --- 3. LÓGICA DE IMÁGENES (BYPASS UNIVERSAL) ---
 @st.cache_data(ttl=3600)
@@ -179,7 +117,7 @@ if st.session_state.estado == "esperando":
     if not st.session_state.modo_manual:
         st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>APUNTE AL CÓDIGO DE BARRAS</h3>", unsafe_allow_html=True)
         
-        # ESCÁNER FULL-FRAME (SIN CORCHETES / BLOQUEO QR / AUTO-ENTER)
+        # ESCÁNER FULL-FRAME (SIN CORCHETES / BLOQUEO QR / AUTO-ENTER / IPHONE FIX)
         st.components.v1.html("""
             <style>
                 #reader-container { position: relative; width: 100%; height: 260px; border-radius: 20px; overflow: hidden; background: #000; border: 3px solid #D32F2F; margin-top: -10px; }
