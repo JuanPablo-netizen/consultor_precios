@@ -23,9 +23,20 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    """
-    JavaScript para detectar 9 dígitos en el modo manual y procesar automáticamente.
-    """
+    st.components.v1.html("""
+        <script>
+        const monitor = setInterval(() => {
+            const input = window.parent.document.querySelector('input[placeholder="000000000"]');
+            if (input && input.value.length >= 9) {
+                const e = new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
+                input.dispatchEvent(e);
+                input.blur(); // Fuerza la recarga en Streamlit
+                clearInterval(monitor); // Se detiene una vez que dispara
+            }
+        }, 100);
+        </script>
+    """, height=0)
+    
     # --- REEMPLAZA TU BLOQUE DE ESCÁNER POR ESTE ---
     st.components.v1.html("""
             <style>
@@ -96,20 +107,24 @@ def obtener_foto_bypass(sku):
     img_url = f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
     
     try:
-        img_res = requests.get(img_url, headers=headers, timeout=3)
-        if img_res.status_code != 200:
+        res = requests.get(img_url, headers=headers, timeout=3)
+        
+        if res.status_code != 200:
             prod_url = f"https://www.tricot.cl/{sku}.html"
             r = requests.get(prod_url, headers=headers, timeout=2)
+            from bs4 import BeautifulSoup
             soup = BeautifulSoup(r.text, 'html.parser')
             tag = soup.find("meta", property="og:image")
-            if tag: img_res = requests.get(tag["content"], headers=headers, timeout=2)
+            if tag: 
+                res = requests.get(tag["content"], headers=headers, timeout=2)
 
-        if img_res.status_code == 200:
-            encoded = base64.b64encode(img_res.content).decode()
-            return f"data:image/jpeg;base64,{encoded}"
+        if res.status_code == 200:
+            import base64
+            return f"data:image/jpeg;base64,{base64.b64encode(res.content).decode()}"
     except:
         pass
-    return "https://via.placeholder.com/400x400.png?text=Imagen+No+Disponible"
+    
+    return "https://via.placeholder.com/400x400.png?text=Sin+Foto+Disponible"
 
 # --- 4. ESTILOS CSS ---
 st.markdown("""
@@ -167,34 +182,38 @@ if st.session_state.estado == "esperando":
         # ESCÁNER FULL-FRAME (SIN CORCHETES / BLOQUEO QR / AUTO-ENTER)
         st.components.v1.html("""
             <style>
-                #reader-container { position: relative; width: 100%; height: 250px; border-radius: 20px; overflow: hidden; background: #000; border: 3px solid #D32F2F; margin-top: -10px; }
+                #reader-container { position: relative; width: 100%; height: 260px; border-radius: 20px; overflow: hidden; background: #000; border: 3px solid #D32F2F; margin-top: -10px; }
                 #reader__scan_region, #reader canvas, .html5-qrcode-element, #reader__status_span { display: none !important; }
-                #reader video { object-fit: cover !important; height: 250px !important; width: 100% !important; }
+                #reader video { object-fit: cover !important; height: 260px !important; width: 100% !important; }
                 .laser { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: #D32F2F; box-shadow: 0 0 10px #F00; z-index: 100; animation: scan 1.5s infinite; }
                 @keyframes scan { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
             </style>
+            
             <div id="reader-container"><div class="laser"></div><div id="reader"></div></div>
+            
             <script src="https://unpkg.com/html5-qrcode"></script>
             <script>
-                const formats = [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.UPC_A];
-                const html5QrCode = new Html5Qrcode("reader", { formatsToSupport: formats });
+                // Formatos 1D (Bloquea QR) y activa motor nativo de iPhone
+                const scanner = new Html5Qrcode("reader", { 
+                    formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128],
+                    experimentalFeatures: { useBarCodeDetectorIfSupported: true } 
+                });
                 
-                html5QrCode.start({ facingMode: "environment" }, { fps: 30, aspectRatio: 1.0 }, (txt) => {
+                // Resolución forzada para mejorar nitidez en iPhone
+                const config = { fps: 30, aspectRatio: 1.0, videoConstraints: { width: { ideal: 1280 }, height: { ideal: 720 } } };
+                
+                scanner.start({ facingMode: "environment" }, config, (txt) => {
                     const input = window.parent.document.querySelector('input[placeholder="000000000"]');
                     if (input && input.value !== txt) {
-                        // 1. Inyectamos el valor directamente en el prototipo para que React/Streamlit lo detecten
                         const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                         setter.call(input, txt);
                         
-                        // 2. Disparamos eventos de cambio
                         input.dispatchEvent(new Event('input', { bubbles: true }));
                         input.dispatchEvent(new Event('change', { bubbles: true }));
                         
-                        // 3. MODIFICACIÓN: Disparamos el Enter físico para gatillar la búsqueda
-                        const enterEvent = new KeyboardEvent('keydown', {
-                            key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
-                        });
-                        input.dispatchEvent(enterEvent);
+                        const e = new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
+                        input.dispatchEvent(e);
+                        input.blur(); // El gatillo definitivo
                     }
                 });
             </script>
