@@ -200,11 +200,11 @@ if st.session_state.estado == "esperando":
 if st.session_state.estado == "resultado":
     p, sku = st.session_state.p, st.session_state.sku
     
-    # 1. URL ORIGINAL DE LA FOTO
+    # 1. URL ORIGINAL DE LA FOTO (Para abrir al hacer clic)
     img_url = f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
     
-    # Imagen de reemplazo si Tricot bloquea la vista previa
-    img_fallback = "https://via.placeholder.com/400x400/F1F5F9/64748B.png?text=%F0%9F%93%B7+TOQUE+PARA+VER+FOTO"
+    # Imagen estática de reemplazo (Siempre cargará esta para evitar errores)
+    img_fallback = "https://via.placeholder.com/400x400/F1F5F9/64748B.png?text=TOQUE+AQUI+PARA+VER+FOTO"
     
     # 2. PRECIOS Y TENDENCIA
     p_act, p_nue = float(p.get('precio actual', 0)), float(p.get('nuevo precio', 0))
@@ -220,25 +220,8 @@ if st.session_state.estado == "resultado":
     # 4. RESCATE DE CÓDIGO 9 DÍGITOS
     codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
 
-    # 5. HTML ALINEADO A LA IZQUIERDA (CERO ESPACIOS REAL)
-    tarjeta_html = f"""
-<div class="product-card">
-<a href="{img_url}" target="_blank" style="text-decoration: none;">
-<img src="{img_url}" class="product-img" onerror="this.onerror=null; this.src='{img_fallback}';" style="cursor: pointer; border: 2px solid #E2E8F0;">
-</a>
-<div class="product-title">{str(p.get('descripcion', 'PRODUCTO')).upper()}</div>
-<div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">
-{str(p.get('departamento', 'SIN DEPTO'))} | {str(p.get('subcategoria', 'SIN CATEGORÍA'))}
-</div>
-<div class="price-value">$ {p_nue:,.0f}</div>
-<div class="trend-pill {cls}">{var}</div>
-{html_obs}
-<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">
-{codigo_9}
-</div>
-<div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div>
-</div>
-"""
+    # 5. HTML EN UNA SOLA LÍNEA (Esto evita que Streamlit dibuje el recuadro negro)
+    tarjeta_html = f'<div class="product-card"><a href="{img_url}" target="_blank" style="text-decoration: none;"><img src="{img_fallback}" class="product-img" style="cursor: pointer; border: 2px solid #E2E8F0; border-radius: 15px;"></a><div class="product-title">{str(p.get("descripcion", "PRODUCTO")).upper()}</div><div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">{str(p.get("departamento", "SIN DEPTO"))} | {str(p.get("subcategoria", "SIN CATEGORIA"))}</div><div class="price-value">$ {p_nue:,.0f}</div><div class="trend-pill {cls}">{var}</div>{html_obs}<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">{codigo_9}</div><div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div></div>'
     
     st.markdown(tarjeta_html.replace(',', '.'), unsafe_allow_html=True)
 
