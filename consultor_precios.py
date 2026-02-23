@@ -192,6 +192,7 @@ if st.session_state.estado == "esperando":
                 st.session_state.modo_manual = False
                 st.session_state.p = res.iloc[0]
                 st.session_state.sku = sku_6
+                st.session_state.codigo_completo = str(manual).strip()
                 st.session_state.estado = "resultado"
                 st.rerun()
 
@@ -203,42 +204,35 @@ if st.session_state.estado == "resultado":
     p_act, p_nue = float(p.get('precio actual', 0)), float(p.get('nuevo precio', 0))
     var, cls = ("🔻 EL PRECIO BAJÓ", "down") if p_nue < p_act else ("🔺 EL PRECIO SUBIÓ", "up") if p_nue > p_act else ("➖ SIN CAMBIO", "same")
     
-    # 1. LÓGICA DE OBSERVACIONES (Solo se dibuja si existe)
+    # 1. LÓGICA DE OBSERVACIONES
     obs = str(p.get('observaciones', '')).strip()
-    # Filtramos para que no muestre la caja si en el Excel está vacío o dice "nan"
     if obs and obs.lower() not in ['nan', 'none', 'null', '']:
-        html_obs = f"""
-        <div style="margin-top: 20px; padding: 12px; background-color: #FFF3E0; border-left: 5px solid #FF9800; color: #E65100; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">
-            ⚠️ OBS: {obs.upper()}
-        </div>
-        """
+        html_obs = f'<div style="margin-top: 20px; padding: 12px; background-color: #FFF3E0; border-left: 5px solid #FF9800; color: #E65100; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">⚠️ OBS: {obs.upper()}</div>'
     else:
         html_obs = ""
 
-    # 2. Rescatar el código de 9 dígitos (Desde el Excel o lo que escaneaste)
+    # 2. Rescatar el código
     codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
 
-    # 3. Dibujar la tarjeta
-    st.markdown(f"""
-        <div class="product-card">
-            <img src="{img_b64}" class="product-img">
-            <div class="product-title">{str(p.get('descripcion', 'PRODUCTO')).upper()}</div>
-            
-            <div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">
-                {str(p.get('departamento', 'SIN DEPTO'))} | {str(p.get('subcategoria', 'SIN CATEGORÍA'))}
-            </div>
-            
-            <div class="price-value">$ {p_nue:,.0f}</div>
-            <div class="trend-pill {cls}">{var}</div>
-            
-            {html_obs}
-            
-            <div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">
-                {codigo_9}
-            </div>
-            <div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div>
-        </div>
-    """.replace(',', '.'), unsafe_allow_html=True)
+    # 3. HTML PEGADO A LA IZQUIERDA (Para evitar el error del bloque de código)
+    tarjeta_html = f"""
+<div class="product-card">
+    <img src="{img_b64}" class="product-img">
+    <div class="product-title">{str(p.get('descripcion', 'PRODUCTO')).upper()}</div>
+    <div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">
+        {str(p.get('departamento', 'SIN DEPTO'))} | {str(p.get('subcategoria', 'SIN CATEGORÍA'))}
+    </div>
+    <div class="price-value">$ {p_nue:,.0f}</div>
+    <div class="trend-pill {cls}">{var}</div>
+    {html_obs}
+    <div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">
+        {codigo_9}
+    </div>
+    <div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div>
+</div>
+"""
+    
+    st.markdown(tarjeta_html.replace(',', '.'), unsafe_allow_html=True)
 
     if st.button("🔄 CONSULTAR OTRO PRODUCTO", use_container_width=True):
         st.session_state.estado = "esperando"
