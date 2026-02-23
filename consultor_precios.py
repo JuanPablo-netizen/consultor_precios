@@ -23,16 +23,18 @@ def emitir_sonido_ok():
     )
 
 def inyectar_auto_enter():
-    """Esta función SOLO debe contener la lógica del teclado/input"""
     st.components.v1.html("""
         <script>
         const monitor = setInterval(() => {
             const input = window.parent.document.querySelector('input[placeholder="000000000"]');
             if (input && input.value.length >= 9) {
-                const e = new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
-                input.dispatchEvent(e);
-                input.blur(); // Fuerza la recarga en Streamlit
-                clearInterval(monitor); // Se detiene una vez que dispara
+                clearInterval(monitor); // Detiene el monitor
+                
+                // LA JUGADA MAESTRA: Foco y Desenfoque
+                input.focus(); 
+                setTimeout(() => { 
+                    input.blur(); 
+                }, 50);
             }
         }, 100);
         </script>
