@@ -45,30 +45,9 @@ def inyectar_auto_enter():
     """, height=0)
 
 # --- 3. LÓGICA DE IMÁGENES (BYPASS UNIVERSAL) ---
-@st.cache_data(ttl=3600)
 def obtener_foto_bypass(sku):
-    # 1. Headers avanzados (Máscara para engañar al firewall de Tricot)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-        "Referer": "https://www.tricot.cl/", # Le decimos que venimos de su propia página
-        "Accept-Language": "es-CL,es;q=0.9"
-    }
-    
-    url_foto = f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
-    
-    try:
-        # Intento 1: Python intenta descargarla (Aumentamos timeout a 5 segundos)
-        res = requests.get(url_foto, headers=headers, timeout=5)
-        
-        # Si la encuentra y no lo bloquean, usa el Base64
-        if res.status_code == 200:
-            import base64
-            return f"data:image/jpeg;base64,{base64.b64encode(res.content).decode()}"
-            
-    except Exception as e:
-        print(f"Error descargando foto: {e}")
-        pass
+    # Generamos la URL directa. Ya no usamos Python para descargarla.
+    return f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
     
     # 2. EL PLAN B INFALIBLE: Proxy CDN de Imágenes (weserv.nl)
     # Si Railway está bloqueado, le damos al navegador una URL que salta la restricción de Hotlinking.
@@ -101,6 +80,13 @@ st.markdown("""
         height: 65px !important;
         border-radius: 15px !important;
         box-shadow: 0 8px 20px rgba(211,47,47,0.3) !important;
+    
+    .stTextInput input {
+        text-align: center !important;
+        font-size: 28px !important;
+        font-weight: 900 !important;
+        letter-spacing: 3px !important;
+        color: #D32F2F !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -217,13 +203,40 @@ if st.session_state.estado == "resultado":
     p_act, p_nue = float(p.get('precio actual', 0)), float(p.get('nuevo precio', 0))
     var, cls = ("🔻 EL PRECIO BAJÓ", "down") if p_nue < p_act else ("🔺 EL PRECIO SUBIÓ", "up") if p_nue > p_act else ("➖ SIN CAMBIO", "same")
     
+    # 1. LÓGICA DE OBSERVACIONES (Solo se dibuja si existe)
+    obs = str(p.get('observaciones', '')).strip()
+    # Filtramos para que no muestre la caja si en el Excel está vacío o dice "nan"
+    if obs and obs.lower() not in ['nan', 'none', 'null', '']:
+        html_obs = f"""
+        <div style="margin-top: 20px; padding: 12px; background-color: #FFF3E0; border-left: 5px solid #FF9800; color: #E65100; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">
+            ⚠️ OBS: {obs.upper()}
+        </div>
+        """
+    else:
+        html_obs = ""
+
+    # 2. Rescatar el código de 9 dígitos (Desde el Excel o lo que escaneaste)
+    codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
+
+    # 3. Dibujar la tarjeta
     st.markdown(f"""
         <div class="product-card">
             <img src="{img_b64}" class="product-img">
             <div class="product-title">{str(p.get('descripcion', 'PRODUCTO')).upper()}</div>
+            
+            <div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">
+                {str(p.get('departamento', 'SIN DEPTO'))} | {str(p.get('subcategoria', 'SIN CATEGORÍA'))}
+            </div>
+            
             <div class="price-value">$ {p_nue:,.0f}</div>
             <div class="trend-pill {cls}">{var}</div>
-            <div style="margin-top:20px; color:#999; font-size:12px;">SKU: {sku}</div>
+            
+            {html_obs}
+            
+            <div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">
+                {codigo_9}
+            </div>
+            <div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div>
         </div>
     """.replace(',', '.'), unsafe_allow_html=True)
 
