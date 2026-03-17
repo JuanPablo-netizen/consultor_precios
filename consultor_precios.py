@@ -2,10 +2,6 @@ import streamlit as st
 import pandas as pd
 import requests
 import io
-import numpy as np
-import cv2
-import base64
-from bs4 import BeautifulSoup
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
@@ -44,16 +40,6 @@ def inyectar_auto_enter():
         </script>
     """, height=0)
 
-# --- 3. LÓGICA DE IMÁGENES (BYPASS UNIVERSAL) ---
-def obtener_foto_bypass(sku):
-    # Generamos la URL directa. Ya no usamos Python para descargarla.
-    return f"https://www.tricot.cl/on/demandware.static/-/Sites-tricot-master/default/images/large/{sku}_1.jpg"
-    
-    # 2. EL PLAN B INFALIBLE: Proxy CDN de Imágenes (weserv.nl)
-    # Si Railway está bloqueado, le damos al navegador una URL que salta la restricción de Hotlinking.
-    url_sin_https = url_foto.replace("https://", "")
-    return f"https://wsrv.nl/?url={url_sin_https}&w=400&output=jpg"
-
 # --- 4. ESTILOS CSS ---
 st.markdown("""
     <style>
@@ -80,7 +66,7 @@ st.markdown("""
         height: 65px !important;
         border-radius: 15px !important;
         box-shadow: 0 8px 20px rgba(211,47,47,0.3) !important;
-    
+    }
     .stTextInput input {
         text-align: center !important;
         font-size: 28px !important;
@@ -94,12 +80,12 @@ st.markdown("""
 st.markdown("<h1 style='text-align: center; color: #D32F2F; font-size: 28px; font-weight: 900; text-transform: uppercase; margin-top: -20px; margin-bottom: 20px;'>Consultor de Precios Curicó 1</h1>", unsafe_allow_html=True)
 
 # --- 5. LÓGICA DE DATOS ---
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=43200)
 def obtener_datos():
     url = 'https://drive.google.com/uc?export=download&id=1iTKUYxsQBh42zHahtDrLfvULM1o_Qsnb'
     try:
         r = requests.get(url)
-        df = pd.read_excel(io.BytesIO(r.content), engine='openpyxl')
+        df = pd.read_excel(io.BytesIO(r.content), engine='calamine')
         df.columns = [str(c).strip().lower() for c in df.columns]
         df = df.rename(columns={'articulo': 'producto', 'artículo': 'producto', 'codigo': 'producto', 'descripción': 'descripcion'})
         df['producto'] = df['producto'].astype(str).str.strip()
@@ -188,7 +174,7 @@ if st.session_state.estado == "esperando":
         sku_6 = str(manual).strip()[:6]
         df = obtener_datos()
         if df is not None:
-            res = df[df['producto'].str.contains(sku_6)]
+            res = df[df['producto'] == sku_6]
             if not res.empty:
                 emitir_sonido_ok()
                 st.session_state.modo_manual = False
