@@ -82,7 +82,8 @@ st.markdown("<h1 style='text-align: center; color: #D32F2F; font-size: 28px; fon
 # --- 5. LÓGICA DE DATOS ---
 @st.cache_data(ttl=43200)
 def obtener_datos():
-    url = 'https://drive.google.com/uc?export=download&id=1iTKUYxsQBh42zHahtDrLfvULM1o_Qsnb'
+    # Nuevo formato de URL directa y segura para Pandas
+    url = 'https://docs.google.com/spreadsheets/d/1iTKUYxsQBh42zHahtDrLfvULM1o_Qsnb/export?format=xlsx'
     try:
         r = requests.get(url)
         df = pd.read_excel(io.BytesIO(r.content), engine='calamine')
