@@ -89,7 +89,12 @@ def obtener_datos():
         df = pd.read_excel(io.BytesIO(r.content), engine='calamine')
         df.columns = [str(c).strip().lower() for c in df.columns]
         df = df.rename(columns={'articulo': 'producto', 'artículo': 'producto', 'codigo': 'producto', 'descripción': 'descripcion'})
-        df['producto'] = df['producto'].astype(str).str.strip()
+        
+        # --- BLINDAJE CONTRA EL ".0" ---
+        df['producto'] = pd.to_numeric(df['producto'], errors='coerce')
+        df = df.dropna(subset=['producto'])
+        df['producto'] = df['producto'].astype('int64').astype(str).str.strip()
+        
         return df
     except Exception as e:
         # ESTO ES NUEVO: Mostrará el error técnico real en pantalla
