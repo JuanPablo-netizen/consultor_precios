@@ -82,16 +82,19 @@ st.markdown("<h1 style='text-align: center; color: #D32F2F; font-size: 28px; fon
 # --- 5. LÓGICA DE DATOS ---
 @st.cache_data(ttl=43200)
 def obtener_datos():
-    # Nuevo formato de URL directa y segura para Pandas
-    url = 'https://docs.google.com/spreadsheets/d/1iTKUYxsQBh42zHahtDrLfvULM1o_Qsnb/export?format=xlsx'
+    url = 'https://drive.google.com/uc?export=download&id=1iTKUYxsQBh42zHahtDrLfvULM1o_Qsnb'
     try:
         r = requests.get(url)
+        # Usamos tu configuración original que funcionaba
         df = pd.read_excel(io.BytesIO(r.content), engine='calamine')
         df.columns = [str(c).strip().lower() for c in df.columns]
         df = df.rename(columns={'articulo': 'producto', 'artículo': 'producto', 'codigo': 'producto', 'descripción': 'descripcion'})
         df['producto'] = df['producto'].astype(str).str.strip()
         return df
-    except: return None
+    except Exception as e:
+        # ESTO ES NUEVO: Mostrará el error técnico real en pantalla
+        st.error(f"⚠️ Error técnico detallado: {e}")
+        return None
 
 # --- 6. INTERFAZ Y FLUJO ---
 if "estado" not in st.session_state: st.session_state.estado = "esperando"
@@ -174,8 +177,10 @@ if st.session_state.estado == "esperando":
     if manual:
         sku_6 = str(manual).strip()[:6]
         df = obtener_datos()
+        
         if df is not None:
             res = df[df['producto'] == sku_6]
+            
             if not res.empty:
                 emitir_sonido_ok()
                 st.session_state.modo_manual = False
@@ -184,6 +189,17 @@ if st.session_state.estado == "esperando":
                 st.session_state.codigo_completo = str(manual).strip()
                 st.session_state.estado = "resultado"
                 st.rerun()
+            else:
+                # --- EL CÓDIGO NO EXISTE EN EL EXCEL ---
+                st.markdown("""
+                    <div style="background-color: #FFEBEE; border: 2px solid #D32F2F; padding: 15px; border-radius: 15px; text-align: center; margin-top: 15px; box-shadow: 0 4px 10px rgba(211,47,47,0.1);">
+                        <h4 style="color: #D32F2F; margin: 0; font-weight: 900; font-size: 18px;">⚠️ PRODUCTO NO ENCONTRADO</h4>
+                        <p style="color: #D32F2F; margin: 8px 0 0 0; font-size: 14px; font-weight: 600;">Por favor envía una foto de la etiqueta para actualizar la base de datos.</p>
+                    </div>
+                """, unsafe_allow_html=True)
+        else:
+            # --- ERROR AL CARGAR EL EXCEL DE DRIVE ---
+            st.error("🚨 Error interno: No se pudo conectar con la base de datos. Verifica el archivo de Drive.")
 
 # --- PANTALLA DE RESULTADO ---
 if st.session_state.estado == "resultado":
@@ -200,11 +216,25 @@ if st.session_state.estado == "resultado":
     else:
         html_obs = f'<div style="margin-top: 15px; padding: 12px; background-color: #F1F5F9; border-left: 5px solid #94A3B8; color: #64748B; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">✅ SIN OBSERVACIONES</div>'
 
+    # --- 2.5 NUEVO BLOQUE DE STOCK ---
+    # Asumimos que la columna en tu Excel se llama 'stock' (se convierte a minúscula por la limpieza inicial)
+    try:
+        stock_disp = int(float(p.get('stock', 0))) # Convierte a entero por si viene con decimales
+    except:
+        stock_disp = 0
+        
+    # Colores dinámicos: Azul si hay stock, Rojo claro si es 0
+    color_txt_stock = "#1E40AF" if stock_disp > 0 else "#B91C1C"
+    color_bg_stock = "#DBEAFE" if stock_disp > 0 else "#FEE2E2"
+    icono_stock = "📦" if stock_disp > 0 else "🚫"
+    
+    html_stock = f'<div style="margin-top: 10px; padding: 10px; background-color: {color_bg_stock}; color: {color_txt_stock}; border-radius: 8px; font-size: 25px; font-weight: 900;">{icono_stock} STOCK DISPONIBLE: {stock_disp}</div>'
+
     # 3. RESCATE DE CÓDIGO 9 DÍGITOS
     codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
 
-    # 4. HTML EN UNA SOLA LÍNEA (Totalmente limpio, sin etiquetas de imagen)
-    tarjeta_html = f'<div class="product-card"><div class="product-title">{str(p.get("descripcion", "PRODUCTO")).upper()}</div><div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">{str(p.get("departamento", "SIN DEPTO"))} | {str(p.get("subcategoria", "SIN CATEGORIA"))}</div><div class="price-value">$ {p_nue:,.0f}</div><div class="trend-pill {cls}">{var}</div>{html_obs}<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">{codigo_9}</div><div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div></div>'
+    # 4. HTML EN UNA SOLA LÍNEA (Agregamos {html_stock} justo después de {html_obs})
+    tarjeta_html = f'<div class="product-card"><div class="product-title">{str(p.get("descripcion", "PRODUCTO")).upper()}</div><div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">{str(p.get("departamento", "SIN DEPTO"))} | {str(p.get("subcategoria", "SIN CATEGORIA"))}</div><div class="price-value">$ {p_nue:,.0f}</div><div class="trend-pill {cls}">{var}</div>{html_obs}{html_stock}<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">{codigo_9}</div><div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div></div>'
     
     st.markdown(tarjeta_html.replace(',', '.'), unsafe_allow_html=True)
 
