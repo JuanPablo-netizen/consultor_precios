@@ -101,6 +101,17 @@ def obtener_datos():
         st.error(f"⚠️ Error técnico detallado: {e}")
         return None
 
+# --- 5.5 BOTÓN DE SINCRONIZACIÓN MANUAL ---
+with st.sidebar:
+    st.markdown("### ⚙️ Administración")
+    st.info("Usa este botón para descargar inmediatamente los precios más recientes desde Drive.")
+    if st.button("🔄 Sincronizar Base de Precios", use_container_width=True):
+        st.cache_data.clear()  # Esto borra la memoria de 12 horas
+        st.success("✅ Memoria borrada. Cargando nuevos datos...")
+        import time
+        time.sleep(1)
+        st.rerun()
+
 # --- 6. INTERFAZ Y FLUJO ---
 if "estado" not in st.session_state: st.session_state.estado = "esperando"
 if "modo_manual" not in st.session_state: st.session_state.modo_manual = False
