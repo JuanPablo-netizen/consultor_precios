@@ -191,18 +191,31 @@ if st.session_state.estado == "esperando":
             st.rerun()
 
     if manual:
-        sku_6 = str(manual).strip()[:6]
+        # 1. Omitir caracteres ]C1 y limpiar la entrada
+        manual_clean = str(manual).replace("]C1", "").strip()
+        
+        # 2. Rescatar los primeros 6 y 5 dígitos
+        sku_6 = manual_clean[:6]
+        sku_5 = manual_clean[:5]
+        
         df = obtener_datos()
         
         if df is not None:
+            # 3. Buscar primero por 6 dígitos; si no hay resultados, intentar con 5
             res = df[df['producto'] == sku_6]
+            sku_match = sku_6
+            
+            if res.empty:
+                res = df[df['producto'] == sku_5]
+                sku_match = sku_5
             
             if not res.empty:
                 emitir_sonido_ok()
                 st.session_state.modo_manual = False
                 st.session_state.p = res.iloc[0]
-                st.session_state.sku = sku_6
-                st.session_state.codigo_completo = str(manual).strip()
+                st.session_state.sku = sku_match
+                # Guardamos el código completo limpio (sin el ]C1) para mostrarlo en pantalla
+                st.session_state.codigo_completo = manual_clean 
                 st.session_state.estado = "resultado"
                 st.rerun()
             else:
