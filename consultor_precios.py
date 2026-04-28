@@ -158,18 +158,20 @@ if st.session_state.vista_actual == "listado":
             f_linea = st.selectbox("Línea", ["Todas"] + lista_lineas)
             
         with f_col2:
-            # Estandarizamos el texto (todo mayúscula y sin espacios extra) para eliminar duplicados
+            # Estandarizamos el texto
             df['departamento'] = df['departamento'].astype(str).str.strip().str.upper()
-            
             df_filtro_depto = df if f_linea == "Todas" else df[df['linea'] == f_linea]
             
-            # Filtramos los nulos o vacíos que hayan quedado
-            lista_deptos = sorted([x for x in df_filtro_depto['departamento'].unique() if x not in ["N/A", "NAN", ""]])
+            # Forzamos str(x) para evitar el choque entre textos y números nulos
+            lista_deptos = sorted([str(x) for x in df_filtro_depto['departamento'].unique() if str(x).upper() not in ["N/A", "NAN", ""]])
             f_depto = st.selectbox("Departamento", ["Todos"] + lista_deptos)
             
         with f_col3:
+            # Aplicamos la misma estandarización y protección a la subcategoría
+            df['subcategoria'] = df['subcategoria'].astype(str).str.strip().str.upper()
             df_filtro_sub = df_filtro_depto if f_depto == "Todos" else df_filtro_depto[df_filtro_depto['departamento'] == f_depto]
-            lista_subs = sorted([str(x) for x in df_filtro_sub['subcategoria'].unique() if pd.notna(x) and x != "N/A"])
+            
+            lista_subs = sorted([str(x) for x in df_filtro_sub['subcategoria'].unique() if str(x).upper() not in ["N/A", "NAN", ""]])
             f_sub = st.selectbox("Subcategoría", ["Todas"] + lista_subs)
             
         # --- BLOQUE ABAJO: Temporada - Venta 0 - Precio ---
