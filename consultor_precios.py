@@ -248,11 +248,12 @@ if st.session_state.vista_actual == "listado":
             color = '#D32F2F' if val < 0 else 'black'
             return f'color: {color}; font-weight: {"900" if val < 0 else "normal"}'
 
+        # AQUÍ ESTÁ EL CAMBIO: usamos .map en lugar de .applymap
         df_estilado = df_vista.style.format({
             'Precio': lambda x: f"${int(x):,}".replace(",", ".") if x > 0 else "",
             'Stock': "{:d}"
         }).map(estilo_stock_negativo, subset=['Stock'])
-        
+
         # 6. Forzar el color ROJO en los encabezados usando CSS
         st.markdown("""
             <style>
