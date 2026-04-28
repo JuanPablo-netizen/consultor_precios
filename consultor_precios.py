@@ -112,83 +112,252 @@ with st.sidebar:
         time.sleep(1)
         st.rerun()
 
+    # 👇 AGREGA ESTE BLOQUE 👇
+    st.markdown("---")
+    st.markdown("### 📋 Consultas Masivas")
+    if st.button("📦 Ver Listado de Stock", use_container_width=True):
+        st.session_state.vista_actual = "listado"
+        st.rerun()
+
 # --- 6. INTERFAZ Y FLUJO ---
 if "estado" not in st.session_state: st.session_state.estado = "esperando"
 if "modo_manual" not in st.session_state: st.session_state.modo_manual = False
+# 👇 AGREGA ESTA LÍNEA 👇
+if "vista_actual" not in st.session_state: st.session_state.vista_actual = "escaner"
 
-if st.session_state.estado == "esperando":
-    if not st.session_state.modo_manual:
-        st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>APUNTE AL CÓDIGO DE BARRAS</h3>", unsafe_allow_html=True)
+# =======================================================
+# --- VISTA 1: LISTADO DE STOCK CON FILTROS AVANZADOS ---
+# =======================================================
+if st.session_state.vista_actual == "listado":
+    st.markdown("<h3 style='text-align: center; color: #D32F2F; font-weight: 900;'>📦 BÚSQUEDA DE STOCK</h3>", unsafe_allow_html=True)
+    
+    if st.button("📷 VOLVER AL ESCÁNER", use_container_width=True):
+        st.session_state.vista_actual = "escaner"
+        st.rerun()
         
-        # ESCÁNER FULL-FRAME (SIN CORCHETES / BLOQUEO QR / AUTO-ENTER / IPHONE FIX)
-        st.components.v1.html("""
+    df = obtener_datos()
+    
+    if df is not None:
+        # Asegurarnos de que las columnas existan, incluyendo 'venta total'
+        cols_req = ['linea', 'departamento', 'subcategoria', 'temporada', 'nuevo precio', 'stock', 'venta total']
+        for c in cols_req:
+            if c not in df.columns: 
+                df[c] = 0 if c in ['nuevo precio', 'stock', 'venta total'] else "N/A"
+                
+        # Limpiar numéricos
+        df['nuevo precio'] = pd.to_numeric(df['nuevo precio'], errors='coerce').fillna(0)
+        df['venta total'] = pd.to_numeric(df['venta total'], errors='coerce').fillna(0)
+        
+        st.markdown("---")
+        
+        # --- BLOQUE ARRIBA: Linea - Departamento - Subcategoria ---
+        f_col1, f_col2, f_col3 = st.columns(3)
+        
+        with f_col1:
+            lista_lineas = sorted([str(x) for x in df['linea'].unique() if pd.notna(x) and x != "N/A"])
+            f_linea = st.selectbox("Línea", ["Todas"] + lista_lineas)
+            
+        with f_col2:
+            # Estandarizamos el texto (todo mayúscula y sin espacios extra) para eliminar duplicados
+            df['departamento'] = df['departamento'].astype(str).str.strip().str.upper()
+            
+            df_filtro_depto = df if f_linea == "Todas" else df[df['linea'] == f_linea]
+            
+            # Filtramos los nulos o vacíos que hayan quedado
+            lista_deptos = sorted([x for x in df_filtro_depto['departamento'].unique() if x not in ["N/A", "NAN", ""]])
+            f_depto = st.selectbox("Departamento", ["Todos"] + lista_deptos)
+            
+        with f_col3:
+            df_filtro_sub = df_filtro_depto if f_depto == "Todos" else df_filtro_depto[df_filtro_depto['departamento'] == f_depto]
+            lista_subs = sorted([str(x) for x in df_filtro_sub['subcategoria'].unique() if pd.notna(x) and x != "N/A"])
+            f_sub = st.selectbox("Subcategoría", ["Todas"] + lista_subs)
+            
+        # --- BLOQUE ABAJO: Temporada - Venta 0 - Precio ---
+        b_col1, b_col2, b_col3 = st.columns(3)
+        
+        with b_col1:
+            # Estandarizamos el texto (todo mayúscula y sin espacios extra)
+            df['temporada'] = df['temporada'].astype(str).str.strip().str.upper()
+            
+            # Simplificamos INV. a INVIERNO y VER. a VERANO
+            df['temporada'] = df['temporada'].replace({'INV.': 'INVIERNO', 'VER.': 'VERANO'})
+            
+            # Filtramos los nulos o vacíos que hayan quedado
+            lista_temp = sorted([x for x in df['temporada'].unique() if x not in ["N/A", "NAN", ""]])
+            f_temp = st.selectbox("Temporada", ["Todas"] + lista_temp)
+            
+        with b_col2:
+            f_venta_cero = st.selectbox("Venta 0", ["Ambos", "Sí", "No"])
+            
+        with b_col3:
+            lista_precios = sorted([float(x) for x in df['nuevo precio'].unique() if pd.notna(x)])
+            
+            # Función interna para formatear la vista del selector
+            def formato_precio_cl(val):
+                if val == "Todos": 
+                    return val
+                return f"${int(val):,}".replace(",", ".")
+                
+            f_precio = st.selectbox("Precio", ["Todos"] + lista_precios, format_func=formato_precio_cl)
+
+        # --- APLICAR FILTROS ---
+        df_mostrar = df.copy()
+        
+        if f_linea != "Todas": df_mostrar = df_mostrar[df_mostrar['linea'] == f_linea]
+        if f_depto != "Todos": df_mostrar = df_mostrar[df_mostrar['departamento'] == f_depto]
+        if f_sub != "Todas": df_mostrar = df_mostrar[df_mostrar['subcategoria'] == f_sub]
+        if f_temp != "Todas": df_mostrar = df_mostrar[df_mostrar['temporada'] == f_temp]
+        
+        if f_venta_cero == "Sí":
+            df_mostrar = df_mostrar[df_mostrar['venta total'] == 0]
+        elif f_venta_cero == "No":
+            df_mostrar = df_mostrar[df_mostrar['venta total'] > 0]
+            
+        if f_precio != "Todos":
+            df_mostrar = df_mostrar[df_mostrar['nuevo precio'] == f_precio]
+        
+        st.success(f"🔍 Mostrando {len(df_mostrar)} productos encontrados")
+        
+        # --- PREPARAR COLUMNAS Y ENCABEZADOS ---
+        mapa_columnas = {
+            'producto': 'Producto',
+            'descripcion': 'Descripción',
+            'temporada': 'Temporada',
+            'stock': 'Stock',
+            'nuevo precio': 'Precio'
+        }
+        
+        # 1. Filtramos y renombramos
+        cols_finales = [c for c in mapa_columnas.keys() if c in df_mostrar.columns]
+        df_vista = df_mostrar[cols_finales].rename(columns=mapa_columnas)
+
+        # 2. Limpieza de datos a numérico real para ordenar y formatear
+        df_vista['Stock'] = pd.to_numeric(df_vista['Stock'], errors='coerce').fillna(0).astype(int)
+        df_vista['Precio'] = pd.to_numeric(df_vista['Precio'], errors='coerce').fillna(0)
+
+        # 3. ORDENAR: Por Stock de Mayor a Menor
+        df_vista = df_vista.sort_values(by='Stock', ascending=False)
+
+        # 4. Totalizar (lo guardamos para mostrarlo abajo y no romper el orden de la tabla)
+        total_stock = df_vista['Stock'].sum()
+
+        # 5. Aplicar formatos y colores condicionales (Rojo para negativos)
+        def estilo_stock_negativo(val):
+            color = '#D32F2F' if val < 0 else 'black'
+            return f'color: {color}; font-weight: {"900" if val < 0 else "normal"}'
+
+        df_estilado = df_vista.style.format({
+            'Precio': lambda x: f"${int(x):,}".replace(",", ".") if x > 0 else "",
+            'Stock': "{:d}"
+        }).applymap(estilo_stock_negativo, subset=['Stock'])
+
+        # 6. Forzar el color ROJO en los encabezados usando CSS
+        st.markdown("""
             <style>
-                #reader-container { position: relative; width: 100%; height: 260px; border-radius: 20px; overflow: hidden; background: #000; border: 3px solid #D32F2F; margin-top: -10px; }
-                #reader__scan_region, #reader canvas, .html5-qrcode-element, #reader__status_span { display: none !important; }
-                #reader video { object-fit: cover !important; height: 260px !important; width: 100% !important; transform: scaleX(1) !important; }
-                .laser { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: #D32F2F; box-shadow: 0 0 10px #F00; z-index: 100; animation: scan 1.5s infinite; }
-                @keyframes scan { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+            [data-testid="stDataFrame"] th {
+                background-color: #D32F2F !important;
+                color: #FFFFFF !important;
+                font-weight: 900 !important;
+            }
             </style>
-            
-            <div id="reader-container"><div class="laser"></div><div id="reader"></div></div>
-            
-            <script src="https://unpkg.com/html5-qrcode"></script>
-            <script>
-                // Formatos 1D (Bloquea QR) y activa motor nativo de iPhone
-                const scanner = new Html5Qrcode("reader", { 
-                    formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128],
-                    experimentalFeatures: { useBarCodeDetectorIfSupported: true } 
-                });
-                
-                // PARCHE iOS: Intentar forzar autofocus y mejorar el campo de visión
-                const config = { 
-                    fps: 30, 
-                    // Quitamos aspectRatio: 1.0 para que el iPhone use todo el sensor sin recortar
-                    videoConstraints: { 
-                        facingMode: "environment",
-                        width: { ideal: 1920 }, // Subimos a Full HD para compensar la falta de enfoque
-                        height: { ideal: 1080 },
-                        // Truco para pedirle a Safari que intente enfocar automáticamente
-                        advanced: [{ focusMode: "continuous" }] 
-                    } 
-                };
-                
-                scanner.start({ facingMode: "environment" }, config, (txt) => {
-                    const input = window.parent.document.querySelector('input[placeholder="000000000"]');
-                    if (input && input.value !== txt) {
-                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                        setter.call(input, txt);
-                        
-                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                        
-                        // 📳 HACE VIBRAR EL TELÉFONO AL ESCANEAR (Android)
-                        if (navigator.vibrate) {
-                            navigator.vibrate(200); 
-                        }
-                        
-                        input.focus();
-                        setTimeout(() => {
-                            input.blur(); // Gatilla la búsqueda
-                        }, 50);
-                    }
-                });
-            </script>
-        """, height=280)
+        """, unsafe_allow_html=True)
+        
+        # 7. Renderizar tabla
+        st.dataframe(
+            df_estilado,
+            use_container_width=True,
+            hide_index=True,
+            height=450
+        )
 
-        manual = st.text_input("DIGITE CÓDIGO", placeholder="000000000", label_visibility="collapsed")
-        inyectar_auto_enter()
+        # 8. Mostrar el TOTAL de forma destacada al pie de la tabla
+        st.markdown(f"""
+            <div style="background-color: #FEE2E2; padding: 10px; border-radius: 10px; text-align: center; border: 2px solid #D32F2F; margin-top: -10px;">
+                <span style="color: #D32F2F; font-weight: 900; font-size: 18px;">TOTAL STOCK FILTRADO: {total_stock}</span>
+            </div>
+        """, unsafe_allow_html=True)
         
-        if st.button("✍️ CONSULTAR MANUALMENTE", use_container_width=True):
-            st.session_state.modo_manual = True
-            st.rerun()
     else:
-        st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>INGRESE EL CÓDIGO MANUALMENTE</h3>", unsafe_allow_html=True)
-        manual = st.text_input("DIGITE CÓDIGO", placeholder="000000000")
-        inyectar_auto_enter()
-        
-        if st.button("📷 VOLVER AL ESCÁNER", use_container_width=True):
-            st.session_state.modo_manual = False
-            st.rerun()
+        st.error("No se pudo cargar la base de datos.")
+
+# =======================================================
+# --- VISTA 2: EL ESCÁNER ORIGINAL (Se oculta si estás en el listado) ---
+# =======================================================
+elif st.session_state.vista_actual == "escaner":
+
+    if st.session_state.estado == "esperando":
+        if not st.session_state.modo_manual:
+            st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>APUNTE AL CÓDIGO DE BARRAS</h3>", unsafe_allow_html=True)
+            
+            # ESCÁNER FULL-FRAME (SIN CORCHETES / BLOQUEO QR / AUTO-ENTER / IPHONE FIX)
+            st.components.v1.html("""
+                <style>
+                    #reader-container { position: relative; width: 100%; height: 260px; border-radius: 20px; overflow: hidden; background: #000; border: 3px solid #D32F2F; margin-top: -10px; }
+                    #reader__scan_region, #reader canvas, .html5-qrcode-element, #reader__status_span { display: none !important; }
+                    #reader video { object-fit: cover !important; height: 260px !important; width: 100% !important; transform: scaleX(1) !important; }
+                    .laser { position: absolute; top: 50%; left: 10%; width: 80%; height: 2px; background: #D32F2F; box-shadow: 0 0 10px #F00; z-index: 100; animation: scan 1.5s infinite; }
+                    @keyframes scan { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+                </style>
+                
+                <div id="reader-container"><div class="laser"></div><div id="reader"></div></div>
+                
+                <script src="https://unpkg.com/html5-qrcode"></script>
+                <script>
+                    // Formatos 1D (Bloquea QR) y activa motor nativo de iPhone
+                    const scanner = new Html5Qrcode("reader", { 
+                        formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128],
+                        experimentalFeatures: { useBarCodeDetectorIfSupported: true } 
+                    });
+                    
+                    // PARCHE iOS: Intentar forzar autofocus y mejorar el campo de visión
+                    const config = { 
+                        fps: 30, 
+                        // Quitamos aspectRatio: 1.0 para que el iPhone use todo el sensor sin recortar
+                        videoConstraints: { 
+                            facingMode: "environment",
+                            width: { ideal: 1920 }, // Subimos a Full HD para compensar la falta de enfoque
+                            height: { ideal: 1080 },
+                            // Truco para pedirle a Safari que intente enfocar automáticamente
+                            advanced: [{ focusMode: "continuous" }] 
+                        } 
+                    };
+                    
+                    scanner.start({ facingMode: "environment" }, config, (txt) => {
+                        const input = window.parent.document.querySelector('input[placeholder="000000000"]');
+                        if (input && input.value !== txt) {
+                            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                            setter.call(input, txt);
+                            
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            
+                            // 📳 HACE VIBRAR EL TELÉFONO AL ESCANEAR (Android)
+                            if (navigator.vibrate) {
+                                navigator.vibrate(200); 
+                            }
+                            
+                            input.focus();
+                            setTimeout(() => {
+                                input.blur(); // Gatilla la búsqueda
+                            }, 50);
+                        }
+                    });
+                </script>
+            """, height=280)
+
+            manual = st.text_input("DIGITE CÓDIGO", placeholder="000000000", label_visibility="collapsed")
+            inyectar_auto_enter()
+            
+            if st.button("✍️ CONSULTAR MANUALMENTE", use_container_width=True):
+                st.session_state.modo_manual = True
+                st.rerun()
+        else:
+            st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>INGRESE EL CÓDIGO MANUALMENTE</h3>", unsafe_allow_html=True)
+            manual = st.text_input("DIGITE CÓDIGO", placeholder="000000000")
+            inyectar_auto_enter()
+            
+            if st.button("📷 VOLVER AL ESCÁNER", use_container_width=True):
+                st.session_state.modo_manual = False
+                st.rerun()
 
     if manual:
         # 1. Omitir caracteres ]C1 y limpiar la entrada
