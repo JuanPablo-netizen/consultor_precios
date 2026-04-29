@@ -218,65 +218,73 @@ if st.session_state.vista_actual == "listado":
         if f_precio != "Todos":
             df_mostrar = df_mostrar[df_mostrar['nuevo precio'] == f_precio]
         
-        st.success(f"🔍 Mostrando {len(df_mostrar)} productos encontrados")
+        # Formateamos la cantidad con separador de miles (punto)
+        cant_productos_fmt = f"{len(df_mostrar):,}".replace(",", ".")
+        st.success(f"🔍 Mostrando {cant_productos_fmt} códigos encontrados")
         
-        # --- PREPARAR COLUMNAS Y ENCABEZADOS ---
+        # --- PREPARAR COLUMNAS Y ENCABEZADOS VISUALES ---
+        # Usamos mayúsculas para forzar el destaque visual (sin emojis)
         mapa_columnas = {
-            'producto': 'Producto',
-            'descripcion': 'Descripción',
-            'temporada': 'Temporada',
-            'stock': 'Stock',
-            'nuevo precio': 'Precio'
+            'producto': 'PRODUCTO',
+            'descripcion': 'DESCRIPCIÓN',
+            'temporada': 'TEMPORADA',
+            'stock': 'STOCK',
+            'nuevo precio': 'PRECIO'
         }
         
         # 1. Filtramos y renombramos
         cols_finales = [c for c in mapa_columnas.keys() if c in df_mostrar.columns]
         df_vista = df_mostrar[cols_finales].rename(columns=mapa_columnas)
 
-        # 2. Limpieza de datos a numérico real para ordenar y formatear
-        df_vista['Stock'] = pd.to_numeric(df_vista['Stock'], errors='coerce').fillna(0).astype(int)
-        df_vista['Precio'] = pd.to_numeric(df_vista['Precio'], errors='coerce').fillna(0)
+        # 2. Limpieza de datos a numérico real
+        df_vista['STOCK'] = pd.to_numeric(df_vista['STOCK'], errors='coerce').fillna(0).astype(int)
+        df_vista['PRECIO'] = pd.to_numeric(df_vista['PRECIO'], errors='coerce').fillna(0)
 
         # 3. ORDENAR: Por Stock de Mayor a Menor
-        df_vista = df_vista.sort_values(by='Stock', ascending=False)
-
-        # 4. Totalizar (lo guardamos para mostrarlo abajo y no romper el orden de la tabla)
-        total_stock = df_vista['Stock'].sum()
-
-        # 5. Aplicar formatos y colores condicionales (Rojo para negativos)
-        def estilo_stock_negativo(val):
-            color = '#D32F2F' if val < 0 else 'black'
-            return f'color: {color}; font-weight: {"900" if val < 0 else "normal"}'
-
-        # AQUÍ ESTÁ EL CAMBIO: usamos .map en lugar de .applymap
-        df_estilado = df_vista.style.format({
-            'Precio': lambda x: f"${int(x):,}".replace(",", ".") if x > 0 else "",
-            'Stock': "{:d}"
-        }).map(estilo_stock_negativo, subset=['Stock'])
-
-        # 6. Forzar el color ROJO en los encabezados usando CSS
-        st.markdown("""
-            <style>
-            [data-testid="stDataFrame"] th {
-                background-color: #D32F2F !important;
-                color: #FFFFFF !important;
-                font-weight: 900 !important;
-            }
-            </style>
-        """, unsafe_allow_html=True)
+        df_vista = df_vista.sort_values(by='STOCK', ascending=False)
         
-        # 7. Renderizar tabla
+        # Reseteamos el índice para que el efecto cebra funcione perfecto
+        df_vista = df_vista.reset_index(drop=True)
+
+        # 4. Totalizar (lo guardamos para mostrarlo abajo)
+        total_stock = df_vista['STOCK'].sum()
+
+        # 5. Funciones de Estilo
+        def estilo_stock_negativo(val):
+            color = '#D32F2F' if val < 0 else '#111827'
+            return f'color: {color}; font-weight: {"900" if val < 0 else "bold"}'
+
+        # Función para efecto cebra (filas de colores alternos gris muy claro/blanco)
+        def efecto_cebra(row):
+            color = '#F8FAFC' if row.name % 2 == 0 else '#FFFFFF'
+            return [f'background-color: {color}' for _ in row]
+
+        # Aplicamos todos los estilos juntos (Forzando STOCK en mayúsculas)
+        df_estilado = (df_vista.style
+            .format({
+                'PRECIO': lambda x: f"${int(x):,}".replace(",", ".") if x > 0 else "",
+                'STOCK': "{:d}"
+            })
+            .apply(efecto_cebra, axis=1)
+            .map(estilo_stock_negativo, subset=['STOCK'])
+            .bar(subset=['STOCK'], color='#FEE2E2', align='left', vmin=0)
+        )
+        
+        # 6. Renderizar tabla (Sin altura fija para que se adapte al contenido)
         st.dataframe(
             df_estilado,
             use_container_width=True,
-            hide_index=True,
-            height=450
+            hide_index=True
         )
+
+        # 8. Mostrar el TOTAL de forma destacada al pie de la tabla
+        # Formateamos el total con separador de miles (punto)
+        total_stock_fmt = f"{int(total_stock):,}".replace(",", ".")
 
         # 8. Mostrar el TOTAL de forma destacada al pie de la tabla
         st.markdown(f"""
             <div style="background-color: #FEE2E2; padding: 10px; border-radius: 10px; text-align: center; border: 2px solid #D32F2F; margin-top: -10px;">
-                <span style="color: #D32F2F; font-weight: 900; font-size: 18px;">TOTAL STOCK FILTRADO: {total_stock}</span>
+                <span style="color: #D32F2F; font-weight: 900; font-size: 18px;">TOTAL STOCK FILTRADO: {total_stock_fmt}</span>
             </div>
         """, unsafe_allow_html=True)
         
