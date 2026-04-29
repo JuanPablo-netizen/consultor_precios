@@ -288,6 +288,9 @@ if st.session_state.vista_actual == "listado":
 # =======================================================
 elif st.session_state.vista_actual == "escaner":
 
+    # 👇 CAMBIO QUIRÚRGICO: Declaramos la variable vacía por defecto para evitar el NameError 👇
+    manual = ""
+
     if st.session_state.estado == "esperando":
         if not st.session_state.modo_manual:
             st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>APUNTE AL CÓDIGO DE BARRAS</h3>", unsafe_allow_html=True)
@@ -402,43 +405,43 @@ elif st.session_state.vista_actual == "escaner":
             # --- ERROR AL CARGAR EL EXCEL DE DRIVE ---
             st.error("🚨 Error interno: No se pudo conectar con la base de datos. Verifica el archivo de Drive.")
 
-# --- PANTALLA DE RESULTADO ---
-if st.session_state.estado == "resultado":
-    p, sku = st.session_state.p, st.session_state.sku
-    
-    # 1. PRECIOS Y TENDENCIA
-    p_act, p_nue = float(p.get('precio actual', 0)), float(p.get('nuevo precio', 0))
-    var, cls = ("🔻 EL PRECIO BAJÓ", "down") if p_nue < p_act else ("🔺 EL PRECIO SUBIÓ", "up") if p_nue > p_act else ("➖ SIN CAMBIO", "same")
-    
-    # 2. OBSERVACIONES
-    obs = str(p.get('observaciones', '')).strip()
-    if obs and obs.lower() not in ['nan', 'none', 'null', '']:
-        html_obs = f'<div style="margin-top: 15px; padding: 12px; background-color: #FFF3E0; border-left: 5px solid #FF9800; color: #E65100; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">⚠️ OBS: {obs.upper()}</div>'
-    else:
-        html_obs = f'<div style="margin-top: 15px; padding: 12px; background-color: #F1F5F9; border-left: 5px solid #94A3B8; color: #64748B; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">✅ SIN OBSERVACIONES</div>'
-
-    # --- 2.5 NUEVO BLOQUE DE STOCK ---
-    # Asumimos que la columna en tu Excel se llama 'stock' (se convierte a minúscula por la limpieza inicial)
-    try:
-        stock_disp = int(float(p.get('stock', 0))) # Convierte a entero por si viene con decimales
-    except:
-        stock_disp = 0
+    # ==========================================================
+    # --- PANTALLA DE RESULTADO (AHORA DENTRO DEL ESCÁNER) ---
+    # ==========================================================
+    if st.session_state.estado == "resultado":
+        p, sku = st.session_state.p, st.session_state.sku
         
-    # Colores dinámicos: Azul si hay stock, Rojo claro si es 0
-    color_txt_stock = "#1E40AF" if stock_disp > 0 else "#B91C1C"
-    color_bg_stock = "#DBEAFE" if stock_disp > 0 else "#FEE2E2"
-    icono_stock = "📦" if stock_disp > 0 else "🚫"
-    
-    html_stock = f'<div style="margin-top: 10px; padding: 10px; background-color: {color_bg_stock}; color: {color_txt_stock}; border-radius: 8px; font-size: 25px; font-weight: 900;">{icono_stock} STOCK DISPONIBLE: {stock_disp}</div>'
+        # 1. PRECIOS Y TENDENCIA
+        p_act, p_nue = float(p.get('precio actual', 0)), float(p.get('nuevo precio', 0))
+        var, cls = ("🔻 EL PRECIO BAJÓ", "down") if p_nue < p_act else ("🔺 EL PRECIO SUBIÓ", "up") if p_nue > p_act else ("➖ SIN CAMBIO", "same")
+        
+        # 2. OBSERVACIONES
+        obs = str(p.get('observaciones', '')).strip()
+        if obs and obs.lower() not in ['nan', 'none', 'null', '']:
+            html_obs = f'<div style="margin-top: 15px; padding: 12px; background-color: #FFF3E0; border-left: 5px solid #FF9800; color: #E65100; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">⚠️ OBS: {obs.upper()}</div>'
+        else:
+            html_obs = f'<div style="margin-top: 15px; padding: 12px; background-color: #F1F5F9; border-left: 5px solid #94A3B8; color: #64748B; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">✅ SIN OBSERVACIONES</div>'
 
-    # 3. RESCATE DE CÓDIGO 9 DÍGITOS
-    codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
+        # --- 2.5 BLOQUE DE STOCK ---
+        try:
+            stock_disp = int(float(p.get('stock', 0))) 
+        except:
+            stock_disp = 0
+            
+        color_txt_stock = "#1E40AF" if stock_disp > 0 else "#B91C1C"
+        color_bg_stock = "#DBEAFE" if stock_disp > 0 else "#FEE2E2"
+        icono_stock = "📦" if stock_disp > 0 else "🚫"
+        
+        html_stock = f'<div style="margin-top: 10px; padding: 10px; background-color: {color_bg_stock}; color: {color_txt_stock}; border-radius: 8px; font-size: 25px; font-weight: 900;">{icono_stock} STOCK DISPONIBLE: {stock_disp}</div>'
 
-    # 4. HTML EN UNA SOLA LÍNEA (Agregamos {html_stock} justo después de {html_obs})
-    tarjeta_html = f'<div class="product-card"><div class="product-title">{str(p.get("descripcion", "PRODUCTO")).upper()}</div><div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">{str(p.get("departamento", "SIN DEPTO"))} | {str(p.get("subcategoria", "SIN CATEGORIA"))}</div><div class="price-value">$ {p_nue:,.0f}</div><div class="trend-pill {cls}">{var}</div>{html_obs}{html_stock}<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">{codigo_9}</div><div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div></div>'
-    
-    st.markdown(tarjeta_html.replace(',', '.'), unsafe_allow_html=True)
+        # 3. RESCATE DE CÓDIGO 9 DÍGITOS
+        codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
 
-    if st.button("🔄 CONSULTAR OTRO PRODUCTO", use_container_width=True):
-        st.session_state.estado = "esperando"
-        st.rerun()
+        # 4. HTML DE LA TARJETA
+        tarjeta_html = f'<div class="product-card"><div class="product-title">{str(p.get("descripcion", "PRODUCTO")).upper()}</div><div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">{str(p.get("departamento", "SIN DEPTO"))} | {str(p.get("subcategoria", "SIN CATEGORIA"))}</div><div class="price-value">$ {p_nue:,.0f}</div><div class="trend-pill {cls}">{var}</div>{html_obs}{html_stock}<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">{codigo_9}</div><div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div></div>'
+        
+        st.markdown(tarjeta_html.replace(',', '.'), unsafe_allow_html=True)
+
+        if st.button("🔄 CONSULTAR OTRO PRODUCTO", use_container_width=True):
+            st.session_state.estado = "esperando"
+            st.rerun()
