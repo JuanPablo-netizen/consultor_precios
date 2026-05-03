@@ -126,167 +126,139 @@ if "modo_manual" not in st.session_state: st.session_state.modo_manual = False
 if "vista_actual" not in st.session_state: st.session_state.vista_actual = "escaner"
 
 # =======================================================
-# --- VISTA 1: LISTADO DE STOCK CON FILTROS AVANZADOS ---
+# --- VISTA 1: LISTADO DE STOCK CON FILTROS UNIFICADOS ---
 # =======================================================
 if st.session_state.vista_actual == "listado":
     st.markdown("<h3 style='text-align: center; color: #D32F2F; font-weight: 900;'>📦 BÚSQUEDA DE STOCK</h3>", unsafe_allow_html=True)
     
-    if st.button("📷 VOLVER AL ESCÁNER", use_container_width=True):
-        st.session_state.vista_actual = "escaner"
-        st.rerun()
-        
-    df = obtener_datos()
+    df_raw = obtener_datos()
     
-    if df is not None:
-        # Asegurarnos de que las columnas existan, incluyendo 'venta total'
-        cols_req = ['linea', 'departamento', 'subcategoria', 'temporada', 'nuevo precio', 'stock', 'venta total']
-        for c in cols_req:
-            if c not in df.columns: 
-                df[c] = 0 if c in ['nuevo precio', 'stock', 'venta total'] else "N/A"
-                
-        # Limpiar numéricos
-        df['nuevo precio'] = pd.to_numeric(df['nuevo precio'], errors='coerce').fillna(0)
-        df['venta total'] = pd.to_numeric(df['venta total'], errors='coerce').fillna(0)
+    if df_raw is not None:
+        df = df_raw.copy()
         
+        # 1. LÓGICA DE TIEMPO (Venta 0 Mes Actual)
+        from datetime import datetime
+        hoy = datetime.now()
+        col_venta_mes = f"ventas {hoy.strftime('%m')}" 
+
+        # 2. LIMPIEZA GLOBAL
+        cols_texto = ['linea', 'departamento', 'subcategoria', 'temporada', 'marca']
+        for c in cols_texto:
+            if c in df.columns:
+                df[c] = df[c].astype(str).str.strip().str.upper().replace(['NAN', 'NONE', 'N/A', ''], 'SIN DATO')
+            else:
+                df[c] = 'SIN DATO'
+
+        for c in ['nuevo precio', 'stock', 'venta total', col_venta_mes]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            else:
+                df[c] = 0
+
         st.markdown("---")
         
-        # --- BLOQUE ARRIBA: Linea - Departamento - Subcategoria ---
-        f_col1, f_col2, f_col3 = st.columns(3)
+        # --- FILTROS FILA 1: Cascada Inteligente ---
+        f1_c1, f1_col2, f1_col3, f1_col4 = st.columns(4)
         
-        with f_col1:
-            lista_lineas = sorted([str(x) for x in df['linea'].unique() if pd.notna(x) and x != "N/A"])
-            f_linea = st.selectbox("Línea", ["Todas"] + lista_lineas)
+        with f1_c1:
+            lista_lineas = sorted([x for x in df['linea'].unique() if x != "SIN DATO"])
+            f_linea = st.selectbox("Línea", ["Todas"] + lista_lineas, key="sb_linea_final")
             
-        with f_col2:
-            # Estandarizamos el texto
-            df['departamento'] = df['departamento'].astype(str).str.strip().str.upper()
-            df_filtro_depto = df if f_linea == "Todas" else df[df['linea'] == f_linea]
+        with f1_col2:
+            df_linea_filter = df if f_linea == "Todas" else df[df['linea'] == f_linea]
+            lista_deptos = sorted([x for x in df_linea_filter['departamento'].unique() if x != "SIN DATO"])
+            f_depto = st.selectbox("Departamento", ["Todos"] + lista_deptos, key="sb_depto_final")
             
-            # Forzamos str(x) para evitar el choque entre textos y números nulos
-            lista_deptos = sorted([str(x) for x in df_filtro_depto['departamento'].unique() if str(x).upper() not in ["N/A", "NAN", ""]])
-            f_depto = st.selectbox("Departamento", ["Todos"] + lista_deptos)
-            
-        with f_col3:
-            # Aplicamos la misma estandarización y protección a la subcategoría
-            df['subcategoria'] = df['subcategoria'].astype(str).str.strip().str.upper()
-            df_filtro_sub = df_filtro_depto if f_depto == "Todos" else df_filtro_depto[df_filtro_depto['departamento'] == f_depto]
-            
-            lista_subs = sorted([str(x) for x in df_filtro_sub['subcategoria'].unique() if str(x).upper() not in ["N/A", "NAN", ""]])
-            f_sub = st.selectbox("Subcategoría", ["Todas"] + lista_subs)
-            
-        # --- BLOQUE ABAJO: Temporada - Venta 0 - Precio ---
-        b_col1, b_col2, b_col3 = st.columns(3)
-        
-        with b_col1:
-            # Estandarizamos el texto (todo mayúscula y sin espacios extra)
-            df['temporada'] = df['temporada'].astype(str).str.strip().str.upper()
-            
-            # Simplificamos INV. a INVIERNO y VER. a VERANO
-            df['temporada'] = df['temporada'].replace({'INV.': 'INVIERNO', 'VER.': 'VERANO'})
-            
-            # Filtramos los nulos o vacíos que hayan quedado
-            lista_temp = sorted([x for x in df['temporada'].unique() if x not in ["N/A", "NAN", ""]])
-            f_temp = st.selectbox("Temporada", ["Todas"] + lista_temp)
-            
-        with b_col2:
-            f_venta_cero = st.selectbox("Venta 0", ["Ambos", "Sí", "No"])
-            
-        with b_col3:
-            lista_precios = sorted([float(x) for x in df['nuevo precio'].unique() if pd.notna(x)])
-            
-            # Función interna para formatear la vista del selector
-            def formato_precio_cl(val):
-                if val == "Todos": 
-                    return val
-                return f"${int(val):,}".replace(",", ".")
-                
-            f_precio = st.selectbox("Precio", ["Todos"] + lista_precios, format_func=formato_precio_cl)
+        with f1_col3:
+            df_depto_filter = df_linea_filter if f_depto == "Todos" else df_linea_filter[df_linea_filter['departamento'] == f_depto]
+            lista_subs = sorted(list(set([x for x in df_depto_filter['subcategoria'].unique() if x != "SIN DATO"])))
+            f_sub = st.selectbox("Subcategoría", ["Todas"] + lista_subs, key="sb_sub_final")
 
-        # --- APLICAR FILTROS ---
-        df_mostrar = df.copy()
+        with f1_col4:
+            # MARCA DINÁMICA: Solo muestra marcas de lo seleccionado arriba
+            df_sub_filter = df_depto_filter if f_sub == "Todas" else df_depto_filter[df_depto_filter['subcategoria'] == f_sub]
+            lista_marcas = sorted(list(set([x for x in df_sub_filter['marca'].unique() if x != "SIN DATO"])))
+            f_marca = st.selectbox("Marca", ["Todas"] + lista_marcas, key="sb_marca_final")
+            
+        # --- FILTROS FILA 2: Atributos y Estado ---
+        f2_c1, f2_c2, f2_c3 = st.columns(3)
         
-        if f_linea != "Todas": df_mostrar = df_mostrar[df_mostrar['linea'] == f_linea]
-        if f_depto != "Todos": df_mostrar = df_mostrar[df_mostrar['departamento'] == f_depto]
-        if f_sub != "Todas": df_mostrar = df_mostrar[df_mostrar['subcategoria'] == f_sub]
-        if f_temp != "Todas": df_mostrar = df_mostrar[df_mostrar['temporada'] == f_temp]
+        with f2_c1:
+            df['temporada'] = df['temporada'].replace({'INV.': 'INVIERNO', 'VER.': 'VERANO'})
+            lista_temp = sorted([x for x in df_sub_filter['temporada'].unique() if x != "SIN DATO"])
+            f_temp = st.selectbox("Temporada", ["Todas"] + lista_temp, key="sb_temp_final")
+            
+        with f2_c2:
+            f_venta_cero = st.selectbox("Venta 0", ["Ambos", "Sí", "No"], key="sb_v0_final")
+            
+        with f2_c3:
+            lista_precios = sorted([float(x) for x in df_sub_filter['nuevo precio'].unique() if x > 0])
+            f_precio = st.selectbox("Precio", ["Todos"] + lista_precios, key="sb_precio_final", 
+                                   format_func=lambda x: f"${int(x):,}".replace(",", ".") if x != "Todos" else x)
+
+        # --- APLICACIÓN DE FILTROS FINALES ---
+        df_mostrar = df_sub_filter.copy()
+        if f_temp != "Todas":  df_mostrar = df_mostrar[df_mostrar['temporada'] == f_temp]
+        if f_marca != "Todas": df_mostrar = df_mostrar[df_mostrar['marca'] == f_marca]
+        if f_precio != "Todos": df_mostrar = df_mostrar[df_mostrar['nuevo precio'] == f_precio]
         
         if f_venta_cero == "Sí":
-            df_mostrar = df_mostrar[df_mostrar['venta total'] == 0]
+            df_mostrar = df_mostrar[df_mostrar[col_venta_mes] == 0]
         elif f_venta_cero == "No":
-            df_mostrar = df_mostrar[df_mostrar['venta total'] > 0]
-            
-        if f_precio != "Todos":
-            df_mostrar = df_mostrar[df_mostrar['nuevo precio'] == f_precio]
-        
-        # Formateamos la cantidad con separador de miles (punto)
-        cant_productos_fmt = f"{len(df_mostrar):,}".replace(",", ".")
-        st.success(f"🔍 Mostrando {cant_productos_fmt} códigos encontrados")
-        
-        # --- PREPARAR COLUMNAS Y ENCABEZADOS VISUALES ---
-        # Usamos mayúsculas para forzar el destaque visual (sin emojis)
+            df_mostrar = df_mostrar[df_mostrar[col_venta_mes] > 0]
+
+        cant_fmt = f"{len(df_mostrar):,}".replace(",", ".")
+        st.success(f"🔍 Mostrando {cant_fmt} códigos encontrados")
+
+        # --- TABLA VISUAL (ORDEN: CÓDIGO, DESCRIPCIÓN, MARCA, TEMPORADA, STOCK, PRECIO) ---
         mapa_columnas = {
             'producto': 'PRODUCTO',
             'descripcion': 'DESCRIPCIÓN',
+            'marca': 'MARCA',
             'temporada': 'TEMPORADA',
             'stock': 'STOCK',
             'nuevo precio': 'PRECIO'
         }
         
-        # 1. Filtramos y renombramos
-        cols_finales = [c for c in mapa_columnas.keys() if c in df_mostrar.columns]
-        df_vista = df_mostrar[cols_finales].rename(columns=mapa_columnas)
-
-        # 2. Limpieza de datos a numérico real
+        # 1. Filtramos y ordenamos las columnas respetando el orden del diccionario anterior
+        cols_f = [c for c in mapa_columnas.keys() if c in df_mostrar.columns]
+        df_vista = df_mostrar[cols_f].rename(columns=mapa_columnas)
+        
+        # 2. Aseguramos tipos de datos para visualización
         df_vista['STOCK'] = pd.to_numeric(df_vista['STOCK'], errors='coerce').fillna(0).astype(int)
         df_vista['PRECIO'] = pd.to_numeric(df_vista['PRECIO'], errors='coerce').fillna(0)
-
-        # 3. ORDENAR: Por Stock de Mayor a Menor
-        df_vista = df_vista.sort_values(by='STOCK', ascending=False)
         
-        # Reseteamos el índice para que el efecto cebra funcione perfecto
-        df_vista = df_vista.reset_index(drop=True)
+        # 3. Ordenamos por Stock de mayor a menor y reseteamos índice
+        df_vista = df_vista.sort_values(by='STOCK', ascending=False).reset_index(drop=True)
 
-        # 4. Totalizar (lo guardamos para mostrarlo abajo)
-        total_stock = df_vista['STOCK'].sum()
-
-        # 5. Funciones de Estilo
-        def estilo_stock_negativo(val):
-            color = '#D32F2F' if val < 0 else '#111827'
-            return f'color: {color}; font-weight: {"900" if val < 0 else "bold"}'
-
-        # Función para efecto cebra (filas de colores alternos gris muy claro/blanco)
+        # 4. Renderizado con Estilos (Efecto cebra y barra de stock)
         def efecto_cebra(row):
-            color = '#F8FAFC' if row.name % 2 == 0 else '#FFFFFF'
-            return [f'background-color: {color}' for _ in row]
+            return ['background-color: #F8FAFC' if row.name % 2 == 0 else 'background-color: #FFFFFF' for _ in row]
 
-        # Aplicamos todos los estilos juntos (Forzando STOCK en mayúsculas)
-        df_estilado = (df_vista.style
+        st.dataframe(
+            df_vista.style
             .format({
-                'PRECIO': lambda x: f"${int(x):,}".replace(",", ".") if x > 0 else "",
+                'PRECIO': lambda x: f"${int(x):,}".replace(",", ".") if x > 0 else "", 
                 'STOCK': "{:d}"
             })
             .apply(efecto_cebra, axis=1)
-            .map(estilo_stock_negativo, subset=['STOCK'])
-            .bar(subset=['STOCK'], color='#FEE2E2', align='left', vmin=0)
-        )
-        
-        # 6. Renderizar tabla (Sin altura fija para que se adapte al contenido)
-        st.dataframe(
-            df_estilado,
-            use_container_width=True,
+            .bar(subset=['STOCK'], color='#FEE2E2', align='left', vmin=0),
+            use_container_width=True, 
             hide_index=True
         )
 
-        # 8. Mostrar el TOTAL de forma destacada al pie de la tabla
-        # Formateamos el total con separador de miles (punto)
-        total_stock_fmt = f"{int(total_stock):,}".replace(",", ".")
-
-        # 8. Mostrar el TOTAL de forma destacada al pie de la tabla
+        # --- TOTAL Y BOTÓN DE REGRESO (AL FINAL) ---
+        total_stock_fmt = f"{int(df_vista['STOCK'].sum()):,}".replace(",", ".")
         st.markdown(f"""
-            <div style="background-color: #FEE2E2; padding: 10px; border-radius: 10px; text-align: center; border: 2px solid #D32F2F; margin-top: -10px;">
+            <div style="background-color: #FEE2E2; padding: 10px; border-radius: 10px; text-align: center; border: 2px solid #D32F2F; margin-bottom: 20px;">
                 <span style="color: #D32F2F; font-weight: 900; font-size: 18px;">TOTAL STOCK FILTRADO: {total_stock_fmt}</span>
             </div>
         """, unsafe_allow_html=True)
+
+        # 👇 BOTÓN REUBICADO Y RENOMBRADO 👇
+        if st.button("VOLVER AL CONSULTOR DE PRECIOS", use_container_width=True):
+            st.session_state.vista_actual = "escaner"
+            st.rerun()
         
     else:
         st.error("No se pudo cargar la base de datos.")
