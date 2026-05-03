@@ -177,7 +177,7 @@ if st.session_state.vista_actual == "listado":
         with f1_col4:
             # MARCA DINÁMICA: Solo muestra marcas de lo seleccionado arriba
             df_sub_filter = df_depto_filter if f_sub == "Todas" else df_depto_filter[df_depto_filter['subcategoria'] == f_sub]
-            lista_marcas = sorted(list(set([x for x in df_sub_filter['marca'].unique() if x != "SIN DATO"])))
+            lista_marcas = sorted([str(x) for x in df_sub_filter['marca'].unique() if str(x) != "SIN DATO" and pd.notna(x)])
             f_marca = st.selectbox("Marca", ["Todas"] + lista_marcas, key="sb_marca_final")
             
         # --- FILTROS FILA 2: Atributos y Estado ---
