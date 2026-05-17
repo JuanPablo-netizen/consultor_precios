@@ -192,9 +192,22 @@ if st.session_state.vista_actual == "listado":
         # 6. CÁLCULO DE MÉTRICAS Y TABLA ÚNICA
         total_skus = len(df_mostrar)
         if total_skus > 0:
-            con_v = len(df_mostrar[df_mostrar[col_venta_mes] > 0])
-            v_0 = total_skus - con_v
-            st.success(f"🔍 {v_0:,} SKU venta 0 ({(v_0/total_skus)*100:.1f}%) | {con_v:,} SKU con venta ({(con_v/total_skus)*100:.1f}%)".replace(',', '.'))
+            skus_con_venta = len(df_mostrar[df_mostrar[col_venta_mes] > 0])
+            skus_venta_0 = total_skus - skus_con_venta
+            
+            pct_v0 = (skus_venta_0 / total_skus) * 100
+            pct_con_v = (skus_con_venta / total_skus) * 100
+            
+            mensaje_metricas = (
+                f"🔍 {skus_venta_0:,} SKU venta 0 ({pct_v0:.1f}%) | "
+                f"{skus_con_venta:,} SKU con venta ({pct_con_v:.1f}%) - Mes en Curso"
+            ).replace(',', '.')
+            
+            # Condición de color: mayor a 40% pinta rojo (st.error), de lo contrario verde (st.success)
+            if pct_v0 > 40:
+                st.error(mensaje_metricas)
+            else:
+                st.success(mensaje_metricas)
 
             mapa_columnas = {
                 'producto': 'PRODUCTO', 'descripcion': 'DESCRIPCIÓN', 'marca': 'MARCA',
