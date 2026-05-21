@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import io
+from fpdf import FPDF
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
@@ -126,11 +127,55 @@ if "modo_manual" not in st.session_state: st.session_state.modo_manual = False
 if "vista_actual" not in st.session_state: st.session_state.vista_actual = "escaner"
 
 # =======================================================
-# --- VISTA 1: LISTADO DE STOCK CON FILTROS UNIFICADOS ---
-# =======================================================
-# =======================================================
 # --- VISTA 1: LISTADO DE STOCK (VERSIÓN LIMPIA Y ESPACIADA) ---
 # =======================================================
+class PDF(FPDF):
+    def __init__(self, depto, sub, venta):
+        super().__init__(orientation='L', unit='mm', format='A4')
+        self.depto = depto
+        self.sub = sub
+        self.venta = venta
+        self.alias_nb_pages()
+
+    def header(self):
+        # Título
+        self.set_font("Arial", 'B', 16)
+        self.cell(0, 10, "Reporte de Stock - Consultor Curico", ln=True, align='C')
+        # Filtros
+        self.set_font("Arial", 'I', 9)
+        self.cell(0, 6, f"Filtros: Depto: {self.depto} | Subcategoría: {self.sub} | Venta: {self.venta}", ln=True, align='C')
+        # Paginación
+        self.set_font("Arial", 'I', 8)
+        self.cell(0, -10, f"Pag {self.page_no()}/{{nb}}", align='R')
+        self.ln(10)
+        # Encabezados de tabla
+        self.set_fill_color(200, 200, 200)
+        self.set_font("Arial", 'B', 8)
+        self.cols = ['PRODUCTO', 'DESCRIPCIÓN', 'MARCA', 'TEMPORADA', 'STOCK', 'PRECIO', 'U. VENDIDAS']
+        self.widths = [25, 90, 35, 40, 20, 25, 25] 
+        for i, col in enumerate(self.cols):
+            self.cell(self.widths[i], 8, col, 1, 0, 'C', fill=True)
+        self.ln()
+
+def generar_pdf(df, depto, sub, venta):
+    pdf = PDF(depto, sub, venta)
+    pdf.add_page()
+    pdf.set_font("Arial", '', 9)
+    for _, row in df.iterrows():
+        # Formato Moneda
+        try: p = f"$ {int(float(row.get('PRECIO', 0))):,}".replace(",", ".")
+        except: p = "$ 0"
+        
+        pdf.cell(pdf.widths[0], 8, str(row.get('PRODUCTO', '')), 1, 0, 'C')
+        pdf.cell(pdf.widths[1], 8, str(row.get('DESCRIPCIÓN', '')), 1, 0, 'L')
+        pdf.cell(pdf.widths[2], 8, str(row.get('MARCA', '')), 1, 0, 'C')
+        pdf.cell(pdf.widths[3], 8, str(row.get('TEMPORADA', '')), 1, 0, 'C')
+        pdf.cell(pdf.widths[4], 8, str(row.get('STOCK', '')), 1, 0, 'C')
+        pdf.cell(pdf.widths[5], 8, p, 1, 0, 'C')
+        pdf.cell(pdf.widths[6], 8, str(row.get('U. VENDIDAS', '')), 1, 0, 'C')
+        pdf.ln()
+    return bytes(pdf.output(dest='S'))
+
 if st.session_state.vista_actual == "listado":
     st.markdown("<h3 style='text-align: center; color: #D32F2F; font-weight: 900;'>📦 BÚSQUEDA DE STOCK</h3>", unsafe_allow_html=True)
     
@@ -231,15 +276,32 @@ if st.session_state.vista_actual == "listado":
                 use_container_width=True, hide_index=True
             )
 
-            # 7. TOTALES Y ESPACIADOR (Soluciona falta de espacio en imagen 5)
+            # 7. TOTALES, ESPACIADOR Y BOTÓN PDF
             t_stock = int(df_vista['STOCK'].sum())
-            st.markdown(f"""
-                <div style='background-color:#FEE2E2;padding:10px;border-radius:10px;text-align:center;border:2px solid #D32F2F;margin-bottom:10px;'>
-                    <span style='color:#D32F2F;font-weight:900;font-size:18px;'>TOTAL STOCK FILTRADO: {t_stock:,}</span>
-                </div>
-            """.replace(',', '.'), unsafe_allow_html=True)
             
-            # Separador visual extra antes del botón
+            # Usamos columnas para poner el total a la izquierda y el botón a la derecha
+            col_t1, col_t2 = st.columns([2, 1])
+            
+            with col_t1:
+                st.markdown(f"""
+                    <div style='background-color:#FEE2E2;padding:10px;border-radius:10px;text-align:center;border:2px solid #D32F2F;margin-bottom:10px;'>
+                        <span style='color:#D32F2F;font-weight:900;font-size:18px;'>TOTAL STOCK FILTRADO: {t_stock:,}</span>
+                    </div>
+                """.replace(',', '.'), unsafe_allow_html=True)
+            
+            with col_t2:
+                # Generamos el PDF con los argumentos necesarios
+                pdf_bytes = generar_pdf(df_vista, f_depto, f_sub, f_venta_cero)
+                
+                st.download_button(
+                    label="📥 Descargar PDF",
+                    data=pdf_bytes,
+                    file_name=f"Stock_Curico_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            
+            # Separador visual extra
             st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
 
         else:
@@ -399,14 +461,27 @@ elif st.session_state.vista_actual == "escaner":
         color_txt_stock = "#1E40AF" if stock_disp > 0 else "#B91C1C"
         color_bg_stock = "#DBEAFE" if stock_disp > 0 else "#FEE2E2"
         icono_stock = "📦" if stock_disp > 0 else "🚫"
-        
-        html_stock = f'<div style="margin-top: 10px; padding: 10px; background-color: {color_bg_stock}; color: {color_txt_stock}; border-radius: 8px; font-size: 25px; font-weight: 900;">{icono_stock} STOCK DISPONIBLE: {stock_disp}</div>'
+        html_stock = f'<div style="margin-top: 10px; padding: 10px; background-color: {color_bg_stock}; color: {color_txt_stock}; border-radius: 8px; font-size: 20px; font-weight: 900;">{icono_stock} STOCK DISP: {stock_disp}</div>'
+
+        # --- 2.6 BLOQUE DE VENTAS MES ACTUAL (NUEVO) ---
+        from datetime import datetime
+        col_venta_mes = f"ventas {datetime.now().strftime('%m')}"
+        try:
+            ventas_mes = int(pd.to_numeric(p.get(col_venta_mes, 0), errors='coerce'))
+        except:
+            ventas_mes = 0
+            
+        # Lógica de color: Rojo si es 0, Azul oscuro si tiene ventas
+        color_txt_ventas = "#B91C1C" if ventas_mes == 0 else "#1E40AF"
+        color_bg_ventas = "#FEE2E2" if ventas_mes == 0 else "#DBEAFE"
+        icono_ventas = "📉" if ventas_mes == 0 else "💰"
+        html_ventas = f'<div style="margin-top: 5px; padding: 10px; background-color: {color_bg_ventas}; color: {color_txt_ventas}; border-radius: 8px; font-size: 20px; font-weight: 900;">{icono_ventas} VENTAS MES: {ventas_mes}</div>'
 
         # 3. RESCATE DE CÓDIGO 9 DÍGITOS
         codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
 
-        # 4. HTML DE LA TARJETA
-        tarjeta_html = f'<div class="product-card"><div class="product-title">{str(p.get("descripcion", "PRODUCTO")).upper()}</div><div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">{str(p.get("departamento", "SIN DEPTO"))} | {str(p.get("subcategoria", "SIN CATEGORIA"))}</div><div class="price-value">$ {p_nue:,.0f}</div><div class="trend-pill {cls}">{var}</div>{html_obs}{html_stock}<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">{codigo_9}</div><div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div></div>'
+        # 4. HTML DE LA TARJETA (Incluye html_ventas)
+        tarjeta_html = f'<div class="product-card"><div class="product-title">{str(p.get("descripcion", "PRODUCTO")).upper()}</div><div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">{str(p.get("departamento", "SIN DEPTO"))} | {str(p.get("subcategoria", "SIN CATEGORIA"))}</div><div class="price-value">$ {p_nue:,.0f}</div><div class="trend-pill {cls}">{var}</div>{html_obs}{html_stock}{html_ventas}<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">{codigo_9}</div><div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div></div>'
         
         st.markdown(tarjeta_html.replace(',', '.'), unsafe_allow_html=True)
 
