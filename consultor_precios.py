@@ -488,7 +488,7 @@ elif st.session_state.vista_actual == "escaner":
         color_txt_stock = "#1E40AF" if stock_disp > 0 else "#B91C1C"
         color_bg_stock = "#DBEAFE" if stock_disp > 0 else "#FEE2E2"
         icono_stock = "📦" if stock_disp > 0 else "🚫"
-        html_stock = f'<div style="margin-top: 10px; padding: 10px; background-color: {color_bg_stock}; color: {color_txt_stock}; border-radius: 8px; font-size: 20px; font-weight: 900;">{icono_stock} STOCK DISP: {stock_disp}</div>'
+        html_stock = f'<div style="margin-top: 10px; padding: 10px; background-color: {color_bg_stock}; color: {color_txt_stock}; border-radius: 8px; font-size: 20px; font-weight: 900;">{icono_stock} STOCK DISPONIBLE: {stock_disp}</div>'
 
         # --- 2.6 BLOQUE DE VENTAS MES ACTUAL (NUEVO) ---
         from datetime import datetime
@@ -502,7 +502,7 @@ elif st.session_state.vista_actual == "escaner":
         color_txt_ventas = "#B91C1C" if ventas_mes == 0 else "#1E40AF"
         color_bg_ventas = "#FEE2E2" if ventas_mes == 0 else "#DBEAFE"
         icono_ventas = "📉" if ventas_mes == 0 else "💰"
-        html_ventas = f'<div style="margin-top: 5px; padding: 10px; background-color: {color_bg_ventas}; color: {color_txt_ventas}; border-radius: 8px; font-size: 20px; font-weight: 900;">{icono_ventas} VENTAS MES: {ventas_mes}</div>'
+        html_ventas = f'<div style="margin-top: 5px; padding: 10px; background-color: {color_bg_ventas}; color: {color_txt_ventas}; border-radius: 8px; font-size: 20px; font-weight: 900;">{icono_ventas} UNIDADES VENDIDAS: {ventas_mes}</div>'
 
         # 3. RESCATE DE CÓDIGO 9 DÍGITOS
         codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
