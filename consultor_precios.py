@@ -222,7 +222,7 @@ if st.session_state.vista_actual == "listado":
         with f2_c3:
             lista_precios = sorted([float(x) for x in df_s['nuevo precio'].unique() if pd.to_numeric(x, errors='coerce') > 0])
             f_precio = st.selectbox("Precio", ["Todos"] + lista_precios, format_func=lambda x: f"${int(x):,}".replace(",", ".") if x != "Todos" else x)
-        f_vista_stock = st.radio("Visualización de Stock:", ["Todo el Stock", "80% del Stock"], horizontal=True)
+            f_vista_stock = st.radio("Visualización de Stock:", ["Todo el Stock", "80% del Stock", "Solo con Observaciones"], horizontal=True)
 
         # 5. APLICACIÓN DE FILTROS
         df_mostrar = df_s.copy()
@@ -235,9 +235,9 @@ if st.session_state.vista_actual == "listado":
         elif f_venta_cero == "Solo con Venta":
             df_mostrar = df_mostrar[df_mostrar[col_venta_mes] > 0]
         
-        # --- CORRECCIÓN: FILTRO PARETO 80/20 (en minúsculas) ---
+        # --- NUEVO: FILTROS DE VISTA (PARETO O OBSERVACIONES) ---
         if f_vista_stock == "80% del Stock":
-            # Cambiamos 'STOCK' por 'stock'
+            # Cambiamos 'STOCK' por 'stock' (minúscula)
             df_mostrar = df_mostrar.sort_values(by='stock', ascending=False)
             total_st = df_mostrar['stock'].sum()
             
@@ -246,6 +246,14 @@ if st.session_state.vista_actual == "listado":
                 # Cambiamos 'STOCK' por 'stock' aquí también
                 df_mostrar = df_mostrar[df_mostrar['cum_stock'] <= (0.8 * total_st)]
                 df_mostrar = df_mostrar.drop(columns=['cum_stock'])
+        
+        elif f_vista_stock == "Solo con Observaciones":
+            # Filtramos para que solo queden filas donde 'observaciones' tiene contenido real
+            # Como ya convertiste los vacíos a 'SIN DATO', solo excluimos ese string
+            df_mostrar = df_mostrar[
+                (df_mostrar['observaciones'].notna()) & 
+                (df_mostrar['observaciones'].astype(str).str.upper() != 'SIN DATO')
+            ]
 
         # 6. CÁLCULO DE MÉTRICAS Y TABLA ÚNICA
         total_skus = len(df_mostrar)
