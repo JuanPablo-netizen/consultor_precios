@@ -6,3 +6,4 @@ beautifulsoup4
 opencv-contrib-python-headless
 numpy
 python-calamine
+fpdf2
