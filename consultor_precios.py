@@ -218,7 +218,7 @@ if st.session_state.vista_actual == "listado":
             lista_temp = sorted([str(x) for x in df_s['temporada'].unique() if str(x) != "SIN DATO"])
             f_temp = st.selectbox("Temporada", ["Todas"] + lista_temp)
         with f2_c2:
-            f_venta_cero = st.selectbox("Filtrar Venta", ["Ambos", "Solo Venta 0", "Solo con Venta"])
+            f_venta_cero = st.selectbox("Filtrar Venta 0", ["Ambos", "Solo Venta 0", "Solo con Venta"])
         with f2_c3:
             lista_precios = sorted([float(x) for x in df_s['nuevo precio'].unique() if pd.to_numeric(x, errors='coerce') > 0])
             f_precio = st.selectbox("Precio", ["Todos"] + lista_precios, format_func=lambda x: f"${int(x):,}".replace(",", ".") if x != "Todos" else x)
