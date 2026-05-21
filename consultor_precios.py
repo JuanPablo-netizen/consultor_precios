@@ -223,11 +223,12 @@ if st.session_state.vista_actual == "listado":
             lista_precios = sorted([float(x) for x in df_s['nuevo precio'].unique() if pd.to_numeric(x, errors='coerce') > 0])
             f_precio = st.selectbox("Precio", ["Todos"] + lista_precios, format_func=lambda x: f"${int(x):,}".replace(",", ".") if x != "Todos" else x)
             # 4.5 FILTRO DE VISTA PARETO / OBSERVACIONES
-        f_vista_stock = st.radio(
-            "Visualización de Stock:", 
-            ["Todo el Stock", "80% del Stock", "Solo con Observaciones"], 
-            horizontal=True
-        )
+        # 4.5 NUEVOS FILTROS COMBINABLES
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            f_pareto = st.checkbox("80% del Stock")
+        with col_c2:
+            f_obs_only = st.checkbox("Solo con Observaciones")
 
         # 5. APLICACIÓN DE FILTROS
         df_mostrar = df_s.copy()
@@ -240,23 +241,25 @@ if st.session_state.vista_actual == "listado":
         elif f_venta_cero == "Solo con Venta":
             df_mostrar = df_mostrar[df_mostrar[col_venta_mes] > 0]
         
-        # --- LÓGICA DE FILTRADO (PARETO / OBSERVACIONES) ---
-        if f_vista_stock == "80% del Stock":
-            df_mostrar = df_mostrar.sort_values(by='stock', ascending=False)
-            total_st = df_mostrar['stock'].sum()
-            if total_st > 0:
-                df_mostrar['cum_stock'] = df_mostrar['stock'].cumsum()
-                df_mostrar = df_mostrar[df_mostrar['cum_stock'] <= (0.8 * total_st)]
-                df_mostrar = df_mostrar.drop(columns=['cum_stock'])
+        # --- LÓGICA DE FILTRADO COMBINABLE (PARETO Y OBSERVACIONES) ---
         
-        elif f_vista_stock == "Solo con Observaciones":
-            # Filtramos para que solo queden filas con contenido real en observaciones
-            # Excluimos 'SIN DATO' y valores vacíos/nulos
+        # 1. Filtro de Observaciones (se aplica primero)
+        if f_obs_only:
             df_mostrar = df_mostrar[
                 (df_mostrar['observaciones'].notna()) & 
                 (df_mostrar['observaciones'].astype(str).str.upper() != 'SIN DATO') &
                 (df_mostrar['observaciones'].astype(str).str.lower() != 'nan')
             ]
+        
+        # 2. Filtro Pareto 80% (se aplica sobre el resultado anterior)
+        if f_pareto:
+            df_mostrar = df_mostrar.sort_values(by='stock', ascending=False)
+            total_st = df_mostrar['stock'].sum()
+            
+            if total_st > 0:
+                df_mostrar['cum_stock'] = df_mostrar['stock'].cumsum()
+                df_mostrar = df_mostrar[df_mostrar['cum_stock'] <= (0.8 * total_st)]
+                df_mostrar = df_mostrar.drop(columns=['cum_stock'])
 
         # 6. CÁLCULO DE MÉTRICAS Y TABLA ÚNICA
         total_skus = len(df_mostrar)
