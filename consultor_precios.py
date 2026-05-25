@@ -464,8 +464,8 @@ elif st.session_state.vista_actual == "instructivos":
 
                         cols_estilo = [c for c in ['STOCK', 'VENTA MES'] if c in df_res.columns]
                         st_tabla = df_res[cols_finales].style\
-                            .applymap(color_texto, subset=cols_estilo)\
-                            .applymap(alinear_derecha, subset=[c for c in ['NUEVO PRECIO'] if c in df_res.columns])
+                            .map(color_texto, subset=cols_estilo)\
+                            .map(alinear_derecha, subset=[c for c in ['NUEVO PRECIO'] if c in df_res.columns])
 
                         column_config = {
                             "CODIGO": st.column_config.TextColumn("Código", width=60),
