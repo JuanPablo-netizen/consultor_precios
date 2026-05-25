@@ -2,12 +2,15 @@ import streamlit as st
 import pandas as pd
 import requests
 import io
+import re
+import fitz
 from fpdf import FPDF
+from datetime import datetime
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
     page_title="Consultor Curicó Pro",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="collapsed"
 )
 
@@ -25,13 +28,10 @@ def inyectar_auto_enter():
         const monitor = setInterval(() => {
             const input = window.parent.document.querySelector('input[placeholder="000000000"]');
             if (input && input.value.length >= 9) {
-                clearInterval(monitor); // Detiene el monitor
-                
-                // 📳 HACE VIBRAR EL TELÉFONO (Android)
+                clearInterval(monitor);
                 if (navigator.vibrate) {
-                    navigator.vibrate(200); // 200 milisegundos
+                    navigator.vibrate(200);
                 }
-                
                 input.focus(); 
                 setTimeout(() => { 
                     input.blur(); 
@@ -86,96 +86,141 @@ def obtener_datos():
     url = 'https://drive.google.com/uc?export=download&id=1iTKUYxsQBh42zHahtDrLfvULM1o_Qsnb'
     try:
         r = requests.get(url)
-        # Usamos tu configuración original que funcionaba
         df = pd.read_excel(io.BytesIO(r.content), engine='calamine')
         df.columns = [str(c).strip().lower() for c in df.columns]
         df = df.rename(columns={'articulo': 'producto', 'artículo': 'producto', 'codigo': 'producto', 'descripción': 'descripcion'})
-        
-        # --- BLINDAJE CONTRA EL ".0" ---
         df['producto'] = pd.to_numeric(df['producto'], errors='coerce')
         df = df.dropna(subset=['producto'])
         df['producto'] = df['producto'].astype('int64').astype(str).str.strip()
-        
         return df
     except Exception as e:
-        # ESTO ES NUEVO: Mostrará el error técnico real en pantalla
         st.error(f"⚠️ Error técnico detallado: {e}")
         return None
+
+@st.cache_data(ttl=3600)
+def cargar_base_precios():
+    url = 'https://drive.google.com/uc?export=download&id=1iTKUYxsQBh42zHahtDrLfvULM1o_Qsnb'
+    response = requests.get(url)
+    return pd.read_excel(io.BytesIO(response.content))
+
+def generar_pdf_simple(image_bytes, titulo):
+    pdf = FPDF(orientation='L', unit='mm', format='Letter')
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, titulo, ln=True, align='C')
+    pdf.ln(5)
+    pdf.image(io.BytesIO(image_bytes), x=10, y=25, w=250, type='PNG')
+    return bytes(pdf.output(dest='S'))
+
+def generar_pdf_completo(image_bytes, df, titulo, advertencias=""):
+    pdf = FPDF(orientation='L', unit='mm', format='Letter')
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, titulo, ln=True, align='C')
+    pdf.ln(5)
+    pdf.image(io.BytesIO(image_bytes), x=10, y=25, w=120, type='PNG')
+    pdf.set_xy(135, 25)
+    pdf.set_font("Arial", 'B', 7)
+    headers = ["Subcategoria", "Código", "Descripción", "Precio Hoy", "Stock", "Vta Un."]
+    col_widths = [35, 15, 45, 20, 12, 12]
+    pdf.set_fill_color(80, 80, 80)
+    pdf.set_text_color(255, 255, 255)
+    for j, col in enumerate(headers):
+        pdf.cell(col_widths[j], 8, col, border=1, align='C', fill=True)
+    pdf.ln()
+    pdf.set_font("Arial", '', 7)
+    pdf.set_text_color(0, 0, 0)
+    for _, row in df.iterrows():
+        pdf.set_x(135)
+        for j, val in enumerate(row):
+            pdf.multi_cell(col_widths[j], 8, str(val), border=1, align='C', ln=3)
+        pdf.ln()
+    if advertencias:
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 8)
+        pdf.set_text_color(255, 0, 0)
+        pdf.set_x(135)
+        pdf.multi_cell(149, 6, advertencias, border=0)
+        pdf.set_text_color(0, 0, 0)
+    return bytes(pdf.output(dest='S'))
+
+def generar_pdf(df, depto, subcat, filtro_venta):
+    col_widths = [20, 80, 30, 30, 15, 25, 25]
+    total_width = sum(col_widths)
+    x_start = (279.4 - total_width) / 2  # Centrado basado en ancho Letter Landscape (279.4 mm)
+
+    class PDFReport(FPDF):
+        def header(self):
+            # Encabezado y Títulos
+            self.set_y(10)
+            self.set_font("Arial", 'B', 14)
+            self.set_text_color(211, 47, 47)
+            self.cell(0, 10, "REPORTE DE STOCK - CONSULTOR CURICO", ln=True, align='C')
+            
+            self.set_font("Arial", 'B', 10)
+            self.set_text_color(80, 80, 80)
+            subtitulo = f"Depto: {depto} | Subcategoria: {subcat} | Filtro: {filtro_venta}"
+            self.cell(0, 8, subtitulo, ln=True, align='C')
+            self.ln(5)
+            
+            # Configuración de Encabezados de Tabla
+            self.set_font("Arial", 'B', 7)
+            self.set_fill_color(211, 47, 47)
+            self.set_text_color(255, 255, 255)
+            
+            self.set_x(x_start)
+            for i, header in enumerate(df.columns):
+                w = col_widths[i] if i < len(col_widths) else 25
+                self.cell(w, 8, str(header), border=1, align='C', fill=True)
+            self.ln()
+
+    pdf = PDFReport(orientation='L', unit='mm', format='Letter')
+    pdf.add_page()
+    
+    # Filas de Datos
+    pdf.set_font("Arial", '', 7)
+    pdf.set_text_color(0, 0, 0)
+    for _, row in df.iterrows():
+        pdf.set_x(x_start)
+        for i, val in enumerate(row):
+            w = col_widths[i] if i < len(col_widths) else 25
+            texto = str(val)[:50] if i == 1 else str(val) # Trunca la descripción si es muy larga
+            pdf.cell(w, 8, texto, border=1, align='C')
+        pdf.ln()
+        
+    return bytes(pdf.output(dest='S'))
 
 # --- 5.5 BOTÓN DE SINCRONIZACIÓN MANUAL ---
 with st.sidebar:
     st.markdown("### ⚙️ Administración")
     st.info("Usa este botón para descargar inmediatamente los precios más recientes desde Drive.")
     if st.button("🔄 Sincronizar Base de Precios", use_container_width=True):
-        st.cache_data.clear()  # Esto borra la memoria de 12 horas
+        st.cache_data.clear()
         st.success("✅ Memoria borrada. Cargando nuevos datos...")
         import time
         time.sleep(1)
         st.rerun()
 
-    # 👇 AGREGA ESTE BLOQUE 👇
     st.markdown("---")
     st.markdown("### 📋 Consultas Masivas")
     if st.button("📦 Ver Listado de Stock", use_container_width=True):
         st.session_state.vista_actual = "listado"
         st.rerun()
 
+    st.markdown("---")
+    st.markdown("### ⏰ Gestiona Instructivos y Catálogos")
+    if st.button("⚙️ Procesa Stock Instructivos y Catálogos", use_container_width=True):
+        st.session_state.vista_actual = "instructivos"
+        st.rerun()
+
 # --- 6. INTERFAZ Y FLUJO ---
 if "estado" not in st.session_state: st.session_state.estado = "esperando"
 if "modo_manual" not in st.session_state: st.session_state.modo_manual = False
-# 👇 AGREGA ESTA LÍNEA 👇
 if "vista_actual" not in st.session_state: st.session_state.vista_actual = "escaner"
 
 # =======================================================
-# --- VISTA 1: LISTADO DE STOCK (VERSIÓN LIMPIA Y ESPACIADA) ---
+# --- VISTA 1: LISTADO DE STOCK ---
 # =======================================================
-class PDF(FPDF):
-    def __init__(self, depto, sub, venta):
-        super().__init__(orientation='L', unit='mm', format='A4')
-        self.depto = depto
-        self.sub = sub
-        self.venta = venta
-        self.alias_nb_pages()
-
-    def header(self):
-        # Título
-        self.set_font("Arial", 'B', 16)
-        self.cell(0, 10, "Reporte de Stock - Consultor Curico", ln=True, align='C')
-        # Filtros
-        self.set_font("Arial", 'I', 9)
-        self.cell(0, 6, f"Filtros: Depto: {self.depto} | Subcategoría: {self.sub} | Venta: {self.venta}", ln=True, align='C')
-        # Paginación
-        self.set_font("Arial", 'I', 8)
-        self.cell(0, -10, f"Pag {self.page_no()}/{{nb}}", align='R')
-        self.ln(10)
-        # Encabezados de tabla
-        self.set_fill_color(200, 200, 200)
-        self.set_font("Arial", 'B', 8)
-        self.cols = ['PRODUCTO', 'DESCRIPCIÓN', 'MARCA', 'TEMPORADA', 'STOCK', 'PRECIO', 'U. VENDIDAS']
-        self.widths = [25, 90, 35, 40, 20, 25, 25] 
-        for i, col in enumerate(self.cols):
-            self.cell(self.widths[i], 8, col, 1, 0, 'C', fill=True)
-        self.ln()
-
-def generar_pdf(df, depto, sub, venta):
-    pdf = PDF(depto, sub, venta)
-    pdf.add_page()
-    pdf.set_font("Arial", '', 9)
-    for _, row in df.iterrows():
-        # Formato Moneda
-        try: p = f"$ {int(float(row.get('PRECIO', 0))):,}".replace(",", ".")
-        except: p = "$ 0"
-        
-        pdf.cell(pdf.widths[0], 8, str(row.get('PRODUCTO', '')), 1, 0, 'C')
-        pdf.cell(pdf.widths[1], 8, str(row.get('DESCRIPCIÓN', '')), 1, 0, 'L')
-        pdf.cell(pdf.widths[2], 8, str(row.get('MARCA', '')), 1, 0, 'C')
-        pdf.cell(pdf.widths[3], 8, str(row.get('TEMPORADA', '')), 1, 0, 'C')
-        pdf.cell(pdf.widths[4], 8, str(row.get('STOCK', '')), 1, 0, 'C')
-        pdf.cell(pdf.widths[5], 8, p, 1, 0, 'C')
-        pdf.cell(pdf.widths[6], 8, str(row.get('U. VENDIDAS', '')), 1, 0, 'C')
-        pdf.ln()
-    return bytes(pdf.output(dest='S'))
-
 if st.session_state.vista_actual == "listado":
     st.markdown("<h3 style='text-align: center; color: #D32F2F; font-weight: 900;'>📦 BÚSQUEDA DE STOCK</h3>", unsafe_allow_html=True)
     
@@ -184,17 +229,13 @@ if st.session_state.vista_actual == "listado":
     if df_raw is not None:
         df = df_raw.copy()
         
-        # 1. LÓGICA DE TIEMPO
-        from datetime import datetime
         hoy = datetime.now()
-        col_venta_mes = f"ventas {hoy.strftime('%m')}" 
+        col_venta_mes = f"ventas {hoy.strftime('%m')}"
 
-        # 2. LIMPIEZA GLOBAL (Soluciona TypeError de la imagen 3)
         cols_texto = ['linea', 'departamento', 'subcategoria', 'temporada', 'marca']
         for c in cols_texto:
             df[c] = df[c].astype(str).str.strip().str.upper().replace(['NAN', 'NONE', 'N/A', ''], 'SIN DATO')
 
-        # 3. FILTROS (Fila 1)
         f1_c1, f1_col2, f1_col3, f1_col4 = st.columns(4)
         with f1_c1:
             lista_lineas = sorted([str(x) for x in df['linea'].unique() if str(x) != "SIN DATO"])
@@ -212,7 +253,6 @@ if st.session_state.vista_actual == "listado":
             lista_marcas = sorted([str(x) for x in df_s['marca'].unique() if str(x) != "SIN DATO"])
             f_marca = st.selectbox("Marca", ["Todas"] + lista_marcas)
 
-        # 4. FILTROS (Fila 2)
         f2_c1, f2_c2, f2_c3 = st.columns(3)
         with f2_c1:
             lista_temp = sorted([str(x) for x in df_s['temporada'].unique() if str(x) != "SIN DATO"])
@@ -222,15 +262,13 @@ if st.session_state.vista_actual == "listado":
         with f2_c3:
             lista_precios = sorted([float(x) for x in df_s['nuevo precio'].unique() if pd.to_numeric(x, errors='coerce') > 0])
             f_precio = st.selectbox("Precio", ["Todos"] + lista_precios, format_func=lambda x: f"${int(x):,}".replace(",", ".") if x != "Todos" else x)
-            # 4.5 FILTRO DE VISTA PARETO / OBSERVACIONES
-        # 4.5 NUEVOS FILTROS COMBINABLES
+
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             f_pareto = st.checkbox("80% del Stock")
         with col_c2:
             f_obs_only = st.checkbox("Solo con Observaciones")
 
-        # 5. APLICACIÓN DE FILTROS
         df_mostrar = df_s.copy()
         if f_temp != "Todas": df_mostrar = df_mostrar[df_mostrar['temporada'] == f_temp]
         if f_marca != "Todas": df_mostrar = df_mostrar[df_mostrar['marca'] == f_marca]
@@ -241,9 +279,6 @@ if st.session_state.vista_actual == "listado":
         elif f_venta_cero == "Solo con Venta":
             df_mostrar = df_mostrar[df_mostrar[col_venta_mes] > 0]
         
-        # --- LÓGICA DE FILTRADO COMBINABLE (PARETO Y OBSERVACIONES) ---
-        
-        # 1. Filtro de Observaciones (se aplica primero)
         if f_obs_only:
             df_mostrar = df_mostrar[
                 (df_mostrar['observaciones'].notna()) & 
@@ -251,31 +286,24 @@ if st.session_state.vista_actual == "listado":
                 (df_mostrar['observaciones'].astype(str).str.lower() != 'nan')
             ]
         
-        # 2. Filtro Pareto 80% (se aplica sobre el resultado anterior)
         if f_pareto:
             df_mostrar = df_mostrar.sort_values(by='stock', ascending=False)
             total_st = df_mostrar['stock'].sum()
-            
             if total_st > 0:
                 df_mostrar['cum_stock'] = df_mostrar['stock'].cumsum()
                 df_mostrar = df_mostrar[df_mostrar['cum_stock'] <= (0.8 * total_st)]
                 df_mostrar = df_mostrar.drop(columns=['cum_stock'])
 
-        # 6. CÁLCULO DE MÉTRICAS Y TABLA ÚNICA
         total_skus = len(df_mostrar)
         if total_skus > 0:
             skus_con_venta = len(df_mostrar[df_mostrar[col_venta_mes] > 0])
             skus_venta_0 = total_skus - skus_con_venta
-            
             pct_v0 = (skus_venta_0 / total_skus) * 100
             pct_con_v = (skus_con_venta / total_skus) * 100
-            
             mensaje_metricas = (
                 f"🔍 {skus_venta_0:,} SKU venta 0 ({pct_v0:.1f}%) | "
                 f"{skus_con_venta:,} SKU con venta ({pct_con_v:.1f}%) - Mes en Curso"
             ).replace(',', '.')
-            
-            # Condición de color: mayor a 40% pinta rojo (st.error), de lo contrario verde (st.success)
             if pct_v0 > 40:
                 st.error(mensaje_metricas)
             else:
@@ -303,23 +331,16 @@ if st.session_state.vista_actual == "listado":
                 use_container_width=True, hide_index=True
             )
 
-            # 7. TOTALES, ESPACIADOR Y BOTÓN PDF
             t_stock = int(df_vista['STOCK'].sum())
-            
-            # Usamos columnas para poner el total a la izquierda y el botón a la derecha
             col_t1, col_t2 = st.columns([2, 1])
-            
             with col_t1:
                 st.markdown(f"""
                     <div style='background-color:#FEE2E2;padding:10px;border-radius:10px;text-align:center;border:2px solid #D32F2F;margin-bottom:10px;'>
                         <span style='color:#D32F2F;font-weight:900;font-size:18px;'>TOTAL STOCK FILTRADO: {t_stock:,}</span>
                     </div>
                 """.replace(',', '.'), unsafe_allow_html=True)
-            
             with col_t2:
-                # Generamos el PDF con los argumentos necesarios
                 pdf_bytes = generar_pdf(df_vista, f_depto, f_sub, f_venta_cero)
-                
                 st.download_button(
                     label="📥 Descargar PDF",
                     data=pdf_bytes,
@@ -327,10 +348,7 @@ if st.session_state.vista_actual == "listado":
                     mime="application/pdf",
                     use_container_width=True
                 )
-            
-            # Separador visual extra
             st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-
         else:
             st.warning("⚠️ No se encontraron productos.")
 
@@ -341,18 +359,152 @@ if st.session_state.vista_actual == "listado":
         st.error("No se pudo cargar la base de datos.")
 
 # =======================================================
-# --- VISTA 2: EL ESCÁNER ORIGINAL (Se oculta si estás en el listado) ---
+# --- VISTA 2: INSTRUCTIVOS PDF ---
+# =======================================================
+elif st.session_state.vista_actual == "instructivos":
+    st.title("⚙️ Procesa Stock de Instructivos y Catalogos")
+
+    archivo_pdf = st.file_uploader("Sube tu archivo PDF", type="pdf", key="uploader_unico")
+
+    if archivo_pdf:
+        df_base = cargar_base_precios()
+        df_base.columns = df_base.columns.str.strip()
+        df_base['PRODUCTO'] = df_base['PRODUCTO'].astype(str)
+
+        doc = fitz.open(stream=archivo_pdf.read(), filetype="pdf")
+        nombre = archivo_pdf.name.replace(".pdf", "")
+
+        # --- AGREGA ESTA LEYENDA AQUÍ ---
+        st.markdown("<p style='font-size: 16px; font-weight: 600; color: #666; margin-bottom: -5px;'>👇 Selecciona cada hoja para ver los stock</p>", unsafe_allow_html=True)
+
+        tabs = st.tabs([f":red[Hoja {i+1}]" for i in range(len(doc))])
+
+        for i, tab in enumerate(tabs):
+            with tab:
+                page = doc.load_page(i)
+                pix = page.get_pixmap()
+                imagen_bytes = pix.tobytes("png")
+
+                texto = page.get_text()
+                codigos_encontrados = []
+                for c in re.findall(r'\b\d{6}\b', texto):
+                    if c not in codigos_encontrados:
+                        codigos_encontrados.append(c)
+
+                pdf_data = generar_pdf_simple(imagen_bytes, f"{nombre} - Hoja {i+1}")
+                df_res = None
+                cols_finales = None
+                advertencia_txt = ""
+                codigos_inexistentes = []
+
+                if codigos_encontrados:
+                    codigos_validos = [c for c in codigos_encontrados if c in df_base['PRODUCTO'].values]
+                    codigos_inexistentes = [c for c in codigos_encontrados if c not in df_base['PRODUCTO'].values]
+
+                    if codigos_validos:
+                        df_res = df_base.set_index('PRODUCTO').loc[codigos_validos].reset_index()
+                        df_res = df_res.rename(columns={'PRODUCTO': 'CODIGO'})
+                        mes_actual = datetime.now().strftime('%m')
+                        col_mes = f"VENTAS {mes_actual}"
+                        df_res['VENTA MES'] = df_res[col_mes] if col_mes in df_res.columns else 0
+
+                        if 'NUEVO PRECIO' in df_res.columns:
+                            df_res['NUEVO PRECIO'] = pd.to_numeric(df_res['NUEVO PRECIO'], errors='coerce').fillna(0)
+                            df_res['NUEVO PRECIO'] = df_res['NUEVO PRECIO'].apply(
+                                lambda x: f"$ {int(x):,}".replace(",", ".") if x > 0 else "$ 0"
+                            )
+
+                        cols_a_mostrar = ['SUBCATEGORIA', 'CODIGO', 'DESCRIPCION', 'NUEVO PRECIO', 'STOCK', 'VENTA MES']
+                        cols_finales = [c for c in cols_a_mostrar if c in df_res.columns]
+
+                        if codigos_inexistentes:
+                            advertencia_txt = f"Codigos no encontrados: {', '.join(codigos_inexistentes)}"
+
+                        pdf_data = generar_pdf_completo(imagen_bytes, df_res[cols_finales], f"{nombre} - Hoja {i+1}", advertencia_txt)
+
+                col_titulo, col_boton = st.columns([3, 1])
+                with col_titulo:
+                    st.markdown(f"<h3 style='color: #ff4b4b;'>Detalle Hoja {i+1}</h3>", unsafe_allow_html=True)
+                with col_boton:
+                    st.download_button(
+                        label="📥 Descargarlo en PDF",
+                        data=pdf_data,
+                        file_name=f"{nombre}_hoja_{i+1}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_{i}"
+                    )
+
+                col_izq, col_der = st.columns([1, 1])
+                with col_izq:
+                    st.image(imagen_bytes, use_container_width=True)
+
+                with col_der:
+                    if df_res is not None:
+                        def color_texto(val):
+                            try:
+                                num = float(val)
+                                if num == 0:
+                                    return 'color: #ff4b4b; font-weight: bold;'
+                            except:
+                                pass
+                            return ''
+
+                        def alinear_derecha(val):
+                            return 'text-align: right;'
+
+                        st.markdown("""
+                            <style>
+                            [data-testid="stDataFrame"] thead tr th,
+                            [data-testid="stDataFrame"] th {
+                                color: #ff4b4b !important;
+                                font-weight: bold !important;
+                            }
+                            </style>
+                        """, unsafe_allow_html=True)
+
+                        cols_estilo = [c for c in ['STOCK', 'VENTA MES'] if c in df_res.columns]
+                        st_tabla = df_res[cols_finales].style\
+                            .applymap(color_texto, subset=cols_estilo)\
+                            .applymap(alinear_derecha, subset=[c for c in ['NUEVO PRECIO'] if c in df_res.columns])
+
+                        column_config = {
+                            "CODIGO": st.column_config.TextColumn("Código", width=60),
+                            "DESCRIPCION": st.column_config.TextColumn("Descripción", width=200),
+                            "STOCK": st.column_config.NumberColumn("Stock", width=50, format="%d"),
+                            "VENTA MES": st.column_config.NumberColumn("Vta. Un.", width=70, format="%d"),
+                            "SUBCATEGORIA": st.column_config.TextColumn("Subcategoria", width=100),
+                            "NUEVO PRECIO": st.column_config.TextColumn("Precio Hoy", width=73),
+                        }
+
+                        st.dataframe(
+                            st_tabla,
+                            use_container_width=True,
+                            hide_index=True,
+                            height=(len(df_res) * 35) + 40,
+                            column_config=column_config
+                        )
+
+                        if codigos_inexistentes:
+                            st.markdown("---")
+                            st.warning(f"⚠️ Códigos no encontrados: {', '.join(codigos_inexistentes)}")
+                    else:
+                        if not codigos_encontrados:
+                            st.warning("No se detectaron códigos en esta página.")
+    if st.button("⬅️ VOLVER AL CONSULTOR", use_container_width=True):
+        st.session_state.vista_actual = "escaner"
+        st.rerun()
+
+# =======================================================
+# --- VISTA 3: EL ESCÁNER ORIGINAL ---
 # =======================================================
 elif st.session_state.vista_actual == "escaner":
 
-    # 👇 CAMBIO QUIRÚRGICO: Declaramos la variable vacía por defecto para evitar el NameError 👇
     manual = ""
 
     if st.session_state.estado == "esperando":
         if not st.session_state.modo_manual:
             st.markdown("<h3 style='text-align:center; color:#666; font-size:16px;'>APUNTE AL CÓDIGO DE BARRAS</h3>", unsafe_allow_html=True)
             
-            # ESCÁNER FULL-FRAME (SIN CORCHETES / BLOQUEO QR / AUTO-ENTER / IPHONE FIX)
             st.components.v1.html("""
                 <style>
                     #reader-container { position: relative; width: 100%; height: 260px; border-radius: 20px; overflow: hidden; background: #000; border: 3px solid #D32F2F; margin-top: -10px; }
@@ -366,21 +518,17 @@ elif st.session_state.vista_actual == "escaner":
                 
                 <script src="https://unpkg.com/html5-qrcode"></script>
                 <script>
-                    // Formatos 1D (Bloquea QR) y activa motor nativo de iPhone
                     const scanner = new Html5Qrcode("reader", { 
                         formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128],
                         experimentalFeatures: { useBarCodeDetectorIfSupported: true } 
                     });
                     
-                    // PARCHE iOS: Intentar forzar autofocus y mejorar el campo de visión
                     const config = { 
                         fps: 30, 
-                        // Quitamos aspectRatio: 1.0 para que el iPhone use todo el sensor sin recortar
                         videoConstraints: { 
                             facingMode: "environment",
-                            width: { ideal: 1920 }, // Subimos a Full HD para compensar la falta de enfoque
+                            width: { ideal: 1920 },
                             height: { ideal: 1080 },
-                            // Truco para pedirle a Safari que intente enfocar automáticamente
                             advanced: [{ focusMode: "continuous" }] 
                         } 
                     };
@@ -390,17 +538,13 @@ elif st.session_state.vista_actual == "escaner":
                         if (input && input.value !== txt) {
                             const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                             setter.call(input, txt);
-                            
                             input.dispatchEvent(new Event('input', { bubbles: true }));
-                            
-                            // 📳 HACE VIBRAR EL TELÉFONO AL ESCANEAR (Android)
                             if (navigator.vibrate) {
                                 navigator.vibrate(200); 
                             }
-                            
                             input.focus();
                             setTimeout(() => {
-                                input.blur(); // Gatilla la búsqueda
+                                input.blur();
                             }, 50);
                         }
                     });
@@ -423,17 +567,13 @@ elif st.session_state.vista_actual == "escaner":
                 st.rerun()
 
     if manual:
-        # 1. Omitir caracteres ]C1 y limpiar la entrada
         manual_clean = str(manual).replace("]C1", "").strip()
-        
-        # 2. Rescatar los primeros 6 y 5 dígitos
         sku_6 = manual_clean[:6]
         sku_5 = manual_clean[:5]
         
         df = obtener_datos()
         
         if df is not None:
-            # 3. Buscar primero por 6 dígitos; si no hay resultados, intentar con 5
             res = df[df['producto'] == sku_6]
             sku_match = sku_6
             
@@ -446,12 +586,10 @@ elif st.session_state.vista_actual == "escaner":
                 st.session_state.modo_manual = False
                 st.session_state.p = res.iloc[0]
                 st.session_state.sku = sku_match
-                # Guardamos el código completo limpio (sin el ]C1) para mostrarlo en pantalla
                 st.session_state.codigo_completo = manual_clean 
                 st.session_state.estado = "resultado"
                 st.rerun()
             else:
-                # --- EL CÓDIGO NO EXISTE EN EL EXCEL ---
                 st.markdown("""
                     <div style="background-color: #FFEBEE; border: 2px solid #D32F2F; padding: 15px; border-radius: 15px; text-align: center; margin-top: 15px; box-shadow: 0 4px 10px rgba(211,47,47,0.1);">
                         <h4 style="color: #D32F2F; margin: 0; font-weight: 900; font-size: 18px;">⚠️ PRODUCTO NO ENCONTRADO</h4>
@@ -459,27 +597,20 @@ elif st.session_state.vista_actual == "escaner":
                     </div>
                 """, unsafe_allow_html=True)
         else:
-            # --- ERROR AL CARGAR EL EXCEL DE DRIVE ---
             st.error("🚨 Error interno: No se pudo conectar con la base de datos. Verifica el archivo de Drive.")
 
-    # ==========================================================
-    # --- PANTALLA DE RESULTADO (AHORA DENTRO DEL ESCÁNER) ---
-    # ==========================================================
     if st.session_state.estado == "resultado":
         p, sku = st.session_state.p, st.session_state.sku
         
-        # 1. PRECIOS Y TENDENCIA
         p_act, p_nue = float(p.get('precio actual', 0)), float(p.get('nuevo precio', 0))
         var, cls = ("🔻 EL PRECIO BAJÓ", "down") if p_nue < p_act else ("🔺 EL PRECIO SUBIÓ", "up") if p_nue > p_act else ("➖ SIN CAMBIO", "same")
         
-        # 2. OBSERVACIONES
         obs = str(p.get('observaciones', '')).strip()
         if obs and obs.lower() not in ['nan', 'none', 'null', '']:
             html_obs = f'<div style="margin-top: 15px; padding: 12px; background-color: #FFF3E0; border-left: 5px solid #FF9800; color: #E65100; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">⚠️ OBS: {obs.upper()}</div>'
         else:
             html_obs = f'<div style="margin-top: 15px; padding: 12px; background-color: #F1F5F9; border-left: 5px solid #94A3B8; color: #64748B; border-radius: 8px; font-size: 14px; font-weight: 700; text-align: left;">✅ SIN OBSERVACIONES</div>'
 
-        # --- 2.5 BLOQUE DE STOCK ---
         try:
             stock_disp = int(float(p.get('stock', 0))) 
         except:
@@ -490,24 +621,19 @@ elif st.session_state.vista_actual == "escaner":
         icono_stock = "📦" if stock_disp > 0 else "🚫"
         html_stock = f'<div style="margin-top: 10px; padding: 10px; background-color: {color_bg_stock}; color: {color_txt_stock}; border-radius: 8px; font-size: 20px; font-weight: 900;">{icono_stock} STOCK DISPONIBLE: {stock_disp}</div>'
 
-        # --- 2.6 BLOQUE DE VENTAS MES ACTUAL (NUEVO) ---
-        from datetime import datetime
         col_venta_mes = f"ventas {datetime.now().strftime('%m')}"
         try:
             ventas_mes = int(pd.to_numeric(p.get(col_venta_mes, 0), errors='coerce'))
         except:
             ventas_mes = 0
             
-        # Lógica de color: Rojo si es 0, Azul oscuro si tiene ventas
         color_txt_ventas = "#B91C1C" if ventas_mes == 0 else "#1E40AF"
         color_bg_ventas = "#FEE2E2" if ventas_mes == 0 else "#DBEAFE"
         icono_ventas = "📉" if ventas_mes == 0 else "💰"
         html_ventas = f'<div style="margin-top: 5px; padding: 10px; background-color: {color_bg_ventas}; color: {color_txt_ventas}; border-radius: 8px; font-size: 20px; font-weight: 900;">{icono_ventas} UNIDADES VENDIDAS: {ventas_mes}</div>'
 
-        # 3. RESCATE DE CÓDIGO 9 DÍGITOS
         codigo_9 = st.session_state.get('codigo_completo', p.get('producto', ''))
 
-        # 4. HTML DE LA TARJETA (Incluye html_ventas)
         tarjeta_html = f'<div class="product-card"><div class="product-title">{str(p.get("descripcion", "PRODUCTO")).upper()}</div><div style="font-size: 15px; color: #64748b; font-weight: 700; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">{str(p.get("departamento", "SIN DEPTO"))} | {str(p.get("subcategoria", "SIN CATEGORIA"))}</div><div class="price-value">$ {p_nue:,.0f}</div><div class="trend-pill {cls}">{var}</div>{html_obs}{html_stock}{html_ventas}<div style="margin-top:25px; color:#444; font-size:18px; font-weight: 900; letter-spacing: 3px;">{codigo_9}</div><div style="margin-top:5px; color:#999; font-size:12px;">SKU BASE: {sku}</div></div>'
         
         st.markdown(tarjeta_html.replace(',', '.'), unsafe_allow_html=True)
