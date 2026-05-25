@@ -7,3 +7,4 @@ opencv-contrib-python-headless
 numpy
 python-calamine
 fpdf2
+PyMuPDF
