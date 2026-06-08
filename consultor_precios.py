@@ -128,13 +128,26 @@ def generar_pdf_completo(image_bytes, df, titulo, advertencias=""):
     for j, col in enumerate(headers):
         pdf.cell(col_widths[j], 8, col, border=1, align='C', fill=True)
     pdf.ln()
-    pdf.set_font("Arial", '', 7)
-    pdf.set_text_color(0, 0, 0)
+    
+    # Bucle de datos modificado para aplicar solo negrita si la venta es 0 Y tiene stock
     for _, row in df.iterrows():
         pdf.set_x(135)
+        
+        try:
+            if float(row['VENTA MES']) == 0 and float(row['STOCK']) > 0:
+                pdf.set_font("Arial", 'B', 7) # Solo negrita
+            else:
+                pdf.set_font("Arial", '', 7)
+        except:
+            pdf.set_font("Arial", '', 7)
+            
+        pdf.set_text_color(0, 0, 0)
+        usar_relleno = False
+            
         for j, val in enumerate(row):
-            pdf.multi_cell(col_widths[j], 8, str(val), border=1, align='C', ln=3)
+            pdf.cell(col_widths[j], 8, str(val), border=1, align='C', fill=usar_relleno)
         pdf.ln()
+        
     if advertencias:
         pdf.ln(5)
         pdf.set_font("Arial", 'B', 8)
@@ -155,11 +168,11 @@ def generar_pdf(df, depto, subcat, filtro_venta):
             self.set_y(10)
             self.set_font("Arial", 'B', 14)
             self.set_text_color(211, 47, 47)
-            self.cell(0, 10, "REPORTE DE STOCK - CONSULTOR CURICO", ln=True, align='C')
+            self.cell(0, 10, "REPORTE DE STOCK", ln=True, align='C')
             
             self.set_font("Arial", 'B', 10)
             self.set_text_color(80, 80, 80)
-            subtitulo = f"Depto: {depto} | Subcategoria: {subcat} | Filtro: {filtro_venta}"
+            subtitulo = f"Depto: {depto} | Subcategoria: {subcat} | Tipo: {filtro_venta}"
             self.cell(0, 8, subtitulo, ln=True, align='C')
             self.ln(5)
             
@@ -268,11 +281,16 @@ if st.session_state.vista_actual == "listado":
             f_pareto = st.checkbox("80% del Stock")
         with col_c2:
             f_obs_only = st.checkbox("Solo con Observaciones")
+        f_buscar = st.text_input("🔎 Busqueda Específica", placeholder="Ej: Vest, Denim, etc.")
 
         df_mostrar = df_s.copy()
         if f_temp != "Todas": df_mostrar = df_mostrar[df_mostrar['temporada'] == f_temp]
         if f_marca != "Todas": df_mostrar = df_mostrar[df_mostrar['marca'] == f_marca]
         if f_precio != "Todos": df_mostrar = df_mostrar[df_mostrar['nuevo precio'] == f_precio]
+        if f_buscar.strip():
+            df_mostrar = df_mostrar[
+                df_mostrar['descripcion'].astype(str).str.upper().str.contains(f_buscar.strip().upper(), na=False)
+            ]
         
         if f_venta_cero == "Solo Venta 0":
             df_mostrar = df_mostrar[df_mostrar[col_venta_mes] == 0]
@@ -373,17 +391,17 @@ elif st.session_state.vista_actual == "instructivos":
 
         doc = fitz.open(stream=archivo_pdf.read(), filetype="pdf")
         nombre = archivo_pdf.name.replace(".pdf", "")
+        # Sanitizamos el nombre para evitar problemas de claves
+        nombre_limpio = "".join(filter(str.isalnum, nombre))
 
-        # --- AGREGA ESTA LEYENDA AQUÍ ---
         st.markdown("<p style='font-size: 16px; font-weight: 600; color: #666; margin-bottom: -5px;'>👇 Selecciona cada hoja para ver los stock</p>", unsafe_allow_html=True)
 
-        tabs = st.tabs([f":red[Hoja {i+1}]" for i in range(len(doc))])
+        tabs = st.tabs([f":red[Hoja {idx+1}]" for idx in range(len(doc))])
 
-        for i, tab in enumerate(tabs):
+        # Usamos idx_tab para no confundirnos con otros bucles
+        for idx_tab, tab in enumerate(tabs):
             with tab:
-                page = doc.load_page(i)
-                pix = page.get_pixmap()
-                imagen_bytes = pix.tobytes("png")
+                page = doc.load_page(idx_tab)
 
                 texto = page.get_text()
                 codigos_encontrados = []
@@ -391,7 +409,6 @@ elif st.session_state.vista_actual == "instructivos":
                     if c not in codigos_encontrados:
                         codigos_encontrados.append(c)
 
-                pdf_data = generar_pdf_simple(imagen_bytes, f"{nombre} - Hoja {i+1}")
                 df_res = None
                 cols_finales = None
                 advertencia_txt = ""
@@ -408,30 +425,182 @@ elif st.session_state.vista_actual == "instructivos":
                         col_mes = f"VENTAS {mes_actual}"
                         df_res['VENTA MES'] = df_res[col_mes] if col_mes in df_res.columns else 0
 
-                        if 'NUEVO PRECIO' in df_res.columns:
-                            df_res['NUEVO PRECIO'] = pd.to_numeric(df_res['NUEVO PRECIO'], errors='coerce').fillna(0)
-                            df_res['NUEVO PRECIO'] = df_res['NUEVO PRECIO'].apply(
-                                lambda x: f"$ {int(x):,}".replace(",", ".") if x > 0 else "$ 0"
+                        # --- ESTRATEGIA DUAL CORREGIDA (reemplaza todo el bloque anterior) ---
+                        import math
+                        import re
+
+                        # 1. Obtener imágenes válidas
+                        image_list = page.get_images(full=True)
+                        imagenes_data = []
+                        for img in image_list:
+                            rects = page.get_image_rects(img[0])
+                            if rects and rects[0].width > 80:
+                                r = rects[0]
+                                imagenes_data.append({
+                                    'rect': r,
+                                    'x0': r.x0, 'y0': r.y0, 'x1': r.x1, 'y1': r.y1,
+                                    'cx': (r.x0 + r.x1) / 2,
+                                    'cy': (r.y0 + r.y1) / 2,
+                                    'marcada': False
+                                })
+
+                        # 2. Detectar layout mirando dónde está el TEXTO con códigos
+                        page_width = page.rect.width
+                        bloques_texto = page.get_text("blocks")
+                        codigos_cero = df_res[
+                            (df_res['VENTA MES'] == 0) & (df_res['STOCK'] > 0)
+                        ]['CODIGO'].astype(str).tolist()
+
+                        bloques_con_codigo = [b for b in bloques_texto if re.search(r'\b\d{6}\b', b[4])]
+                        texto_en_derecha = sum(
+                            1 for b in bloques_con_codigo
+                            if (b[0] + b[2]) / 2 > page_width * 0.60
+                        )
+                        es_layout_lateral = (
+                            len(bloques_con_codigo) > 0 and
+                            texto_en_derecha / len(bloques_con_codigo) >= 0.70
+                        )
+
+                        # 3. Función para dibujar el óvalo VTA 0
+                        def dibujar_vta0(page, imagen_rect):
+                            r = imagen_rect
+                            cx = r.x0 + 22
+                            cy = r.y0 + 12
+                            rect_oval = fitz.Rect(cx - 22, cy - 11, cx + 22, cy + 11)
+                            page.draw_oval(rect_oval, color=(1, 0, 0), fill=(1, 0, 0))
+
+                            texto = "VTA 0"
+                            fontsize = 9
+                            ancho_texto = fitz.get_text_length(texto, fontname="hebo", fontsize=fontsize)
+                            texto_x = rect_oval.x0 + (rect_oval.width - ancho_texto) / 2
+                            texto_y = rect_oval.y0 + (rect_oval.height + fontsize) / 2 - 1
+
+                            page.insert_text(
+                                (texto_x, texto_y),
+                                texto,
+                                fontsize=fontsize,
+                                color=(1, 1, 1),
+                                fontname="hebo"
                             )
 
-                        cols_a_mostrar = ['SUBCATEGORIA', 'CODIGO', 'DESCRIPCION', 'NUEVO PRECIO', 'STOCK', 'VENTA MES']
-                        cols_finales = [c for c in cols_a_mostrar if c in df_res.columns]
+                        # 4. PRE-PROCESO LAYOUT LATERAL: construir mapa código→imagen
+                        # Regla: cada fila tiene 2 imágenes (izq, der) y 2 bloques de texto
+                        # ordenados por Y. El 1er bloque → img izq, el 2do → img der
+                        mapa_lateral = {}  # {codigo: imagen_data}
 
-                        if codigos_inexistentes:
-                            advertencia_txt = f"Codigos no encontrados: {', '.join(codigos_inexistentes)}"
+                        if es_layout_lateral:
+                            # Ordenar imágenes por fila (y0 agrupado) luego por x0 (izq→der)
+                            TOLERANCIA_FILA = 50  # px de tolerancia para agrupar imágenes en la misma fila
+                            imgs_ordenadas = sorted(imagenes_data, key=lambda img: (round(img['y0'] / TOLERANCIA_FILA), img['x0']))
 
-                        pdf_data = generar_pdf_completo(imagen_bytes, df_res[cols_finales], f"{nombre} - Hoja {i+1}", advertencia_txt)
+                            # Agrupar imágenes en filas
+                            filas_imgs = []
+                            fila_actual = []
+                            for img in imgs_ordenadas:
+                                if not fila_actual:
+                                    fila_actual.append(img)
+                                else:
+                                    # Si la diferencia de y0 es pequeña, misma fila
+                                    if abs(img['y0'] - fila_actual[0]['y0']) < TOLERANCIA_FILA:
+                                        fila_actual.append(img)
+                                    else:
+                                        filas_imgs.append(sorted(fila_actual, key=lambda i: i['x0']))
+                                        fila_actual = [img]
+                            if fila_actual:
+                                filas_imgs.append(sorted(fila_actual, key=lambda i: i['x0']))
+
+                            # Ordenar bloques con código por Y (cy)
+                            bloques_ordenados = sorted(bloques_con_codigo, key=lambda b: (b[1] + b[3]) / 2)
+
+                            # Para cada fila de imágenes, asignar los bloques que caen en su rango Y
+                            for fila in filas_imgs:
+                                fila_y0 = min(img['y0'] for img in fila)
+                                fila_y1 = max(img['y1'] for img in fila)
+                                margen = (fila_y1 - fila_y0) * 0.3
+
+                                # Bloques cuyo cy cae dentro del rango Y de esta fila
+                                bloques_fila = [
+                                    b for b in bloques_ordenados
+                                    if (fila_y0 - margen) <= (b[1] + b[3]) / 2 <= (fila_y1 + margen)
+                                ]
+                                # Ordenar bloques de la fila por cy (arriba→abajo)
+                                bloques_fila.sort(key=lambda b: (b[1] + b[3]) / 2)
+
+                                # Asignar: bloque[0]→img[0] (izq), bloque[1]→img[1] (der), etc.
+                                for idx, b in enumerate(bloques_fila):
+                                    if idx < len(fila):
+                                        codigos_en_bloque = re.findall(r'\b\d{6}\b', b[4])
+                                        for cod in codigos_en_bloque:
+                                            mapa_lateral[cod] = fila[idx]
+
+                        # 5. Procesar cada código con venta 0
+                        for c in codigos_cero:
+
+                            if es_layout_lateral:
+                                # TIPO B: usar el mapa precalculado
+                                if c in mapa_lateral:
+                                    img = mapa_lateral[c]
+                                    if not img['marcada']:
+                                        img['marcada'] = True
+                                        dibujar_vta0(page, img['rect'])
+
+                            else:
+                                # TIPO A (grilla): imagen ARRIBA en la misma columna X
+                                for b in bloques_texto:
+                                    if str(c) not in b[4]:
+                                        continue
+
+                                    txt_cx = (b[0] + b[2]) / 2
+                                    tolerancia_x = page_width * 0.15
+                                    mejor = None
+                                    min_score = float('inf')
+
+                                    for img in imagenes_data:
+                                        if img['marcada']:
+                                            continue
+                                        dx = abs(img['cx'] - txt_cx)
+                                        dy = b[1] - img['y1']  # distancia base_imagen → tope_texto
+                                        if dx < tolerancia_x and -30 < dy < 300:
+                                            score = dx * 2 + abs(dy)
+                                            if score < min_score:
+                                                min_score = score
+                                                mejor = img
+
+                                    if mejor:
+                                        mejor['marcada'] = True
+                                        dibujar_vta0(page, mejor['rect'])
+
+                                    break  # siguiente código
+
+                # Generar PDF
+                pix = page.get_pixmap()
+                imagen_bytes = pix.tobytes("png")
+
+                if df_res is not None:
+                    # ... (Tu lógica de formato de df_res se mantiene igual)
+                    if 'NUEVO PRECIO' in df_res.columns:
+                        df_res['NUEVO PRECIO'] = pd.to_numeric(df_res['NUEVO PRECIO'], errors='coerce').fillna(0)
+                        df_res['NUEVO PRECIO'] = df_res['NUEVO PRECIO'].apply(
+                            lambda x: f"$ {int(x):,}".replace(",", ".") if x > 0 else "$ 0"
+                        )
+                    cols_a_mostrar = ['SUBCATEGORIA', 'CODIGO', 'DESCRIPCION', 'NUEVO PRECIO', 'STOCK', 'VENTA MES']
+                    cols_finales = [c for c in cols_a_mostrar if c in df_res.columns]
+                    if codigos_inexistentes:
+                        advertencia_txt = f"Codigos no encontrados: {', '.join(codigos_inexistentes)}"
+                    pdf_data = generar_pdf_completo(imagen_bytes, df_res[cols_finales], f"{nombre} - Hoja {idx_tab+1}", advertencia_txt)
+                else:
+                    pdf_data = generar_pdf_simple(imagen_bytes, f"{nombre} - Hoja {idx_tab+1}")
 
                 col_titulo, col_boton = st.columns([3, 1])
                 with col_titulo:
-                    st.markdown(f"<h3 style='color: #ff4b4b;'>Detalle Hoja {i+1}</h3>", unsafe_allow_html=True)
+                    st.markdown(f"<h3 style='color: #ff4b4b;'>Detalle Hoja {idx_tab+1}</h3>", unsafe_allow_html=True)
                 with col_boton:
                     st.download_button(
                         label="📥 Descargarlo en PDF",
                         data=pdf_data,
-                        file_name=f"{nombre}_hoja_{i+1}.pdf",
+                        file_name=f"{nombre}_hoja_{idx_tab+1}.pdf",
                         mime="application/pdf",
-                        key=f"dl_{i}"
+                        key=f"dl_{nombre_limpio}_{idx_tab}" # <--- CLAVE ÚNICA Y SEGURA
                     )
 
                 col_izq, col_der = st.columns([1, 1])
@@ -440,14 +609,14 @@ elif st.session_state.vista_actual == "instructivos":
 
                 with col_der:
                     if df_res is not None:
-                        def color_texto(val):
+                        # 1.- Aplica solo negrita a la fila que contenga venta 0 y stock mayor a 0
+                        def destacar_venta_cero(row):
                             try:
-                                num = float(val)
-                                if num == 0:
-                                    return 'color: #ff4b4b; font-weight: bold;'
+                                if 'VENTA MES' in row and float(row['VENTA MES']) == 0 and 'STOCK' in row and float(row['STOCK']) > 0:
+                                    return ['color: red;'] * len(row)
                             except:
                                 pass
-                            return ''
+                            return [''] * len(row)
 
                         def alinear_derecha(val):
                             return 'text-align: right;'
@@ -462,9 +631,8 @@ elif st.session_state.vista_actual == "instructivos":
                             </style>
                         """, unsafe_allow_html=True)
 
-                        cols_estilo = [c for c in ['STOCK', 'VENTA MES'] if c in df_res.columns]
                         st_tabla = df_res[cols_finales].style\
-                            .map(color_texto, subset=cols_estilo)\
+                            .apply(destacar_venta_cero, axis=1)\
                             .map(alinear_derecha, subset=[c for c in ['NUEVO PRECIO'] if c in df_res.columns])
 
                         column_config = {
