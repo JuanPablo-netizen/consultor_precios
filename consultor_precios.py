@@ -158,8 +158,9 @@ def generar_pdf_completo(image_bytes, df, titulo, advertencias=""):
     return bytes(pdf.output(dest='S'))
 
 def generar_pdf(df, depto, subcat, filtro_venta):
-    col_widths = [20, 80, 30, 30, 15, 25, 25]
-    total_width = sum(col_widths)
+    col_widths = [20, 80, 30, 30, 15, 25, 25, 25] # <-- Se agrega un 25 extra al final
+    anchos_reales = col_widths[:len(df.columns)]  # <-- Nueva línea para saber cuántas columnas hay
+    total_width = sum(anchos_reales)              # <-- Suma dinámica
     x_start = (279.4 - total_width) / 2  # Centrado basado en ancho Letter Landscape (279.4 mm)
 
     class PDFReport(FPDF):
@@ -315,12 +316,12 @@ if st.session_state.vista_actual == "listado":
         total_skus = len(df_mostrar)
         if total_skus > 0:
             skus_con_venta = len(df_mostrar[df_mostrar[col_venta_mes] > 0])
-            skus_venta_0 = total_skus - skus_con_venta
+            skus_venta_0 = len(df_mostrar[(df_mostrar[col_venta_mes] == 0) & (df_mostrar['stock'] > 0)])
             pct_v0 = (skus_venta_0 / total_skus) * 100
             pct_con_v = (skus_con_venta / total_skus) * 100
             mensaje_metricas = (
                 f"🔍 {skus_venta_0:,} SKU venta 0 ({pct_v0:.1f}%) | "
-                f"{skus_con_venta:,} SKU con venta ({pct_con_v:.1f}%) - Mes en Curso"
+                f"{skus_con_venta:,} SKU con venta ({pct_con_v:.1f}%) - Mes en Curso (Dato no considera Stock menor o igual a 0)"
             ).replace(',', '.')
             if pct_v0 > 40:
                 st.error(mensaje_metricas)
@@ -358,7 +359,9 @@ if st.session_state.vista_actual == "listado":
                     </div>
                 """.replace(',', '.'), unsafe_allow_html=True)
             with col_t2:
-                pdf_bytes = generar_pdf(df_vista, f_depto, f_sub, f_venta_cero)
+                df_pdf = df_vista.copy()
+                df_pdf['STOCK EN SALA'] = ""
+                pdf_bytes = generar_pdf(df_pdf, f_depto, f_sub, f_venta_cero)
                 st.download_button(
                     label="📥 Descargar PDF",
                     data=pdf_bytes,
