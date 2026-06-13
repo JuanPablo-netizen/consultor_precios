@@ -317,12 +317,18 @@ if st.session_state.vista_actual == "listado":
         if total_skus > 0:
             skus_con_venta = len(df_mostrar[df_mostrar[col_venta_mes] > 0])
             skus_venta_0 = len(df_mostrar[(df_mostrar[col_venta_mes] == 0) & (df_mostrar['stock'] > 0)])
+            skus_sin_stock = len(df_mostrar[df_mostrar['stock'] <= 0])
+            
             pct_v0 = (skus_venta_0 / total_skus) * 100
             pct_con_v = (skus_con_venta / total_skus) * 100
+            pct_sin_stock = (skus_sin_stock / total_skus) * 100
+            
             mensaje_metricas = (
                 f"🔍 {skus_venta_0:,} SKU venta 0 ({pct_v0:.1f}%) | "
-                f"{skus_con_venta:,} SKU con venta ({pct_con_v:.1f}%) - Mes en Curso (Dato no considera Stock menor o igual a 0)"
+                f"{skus_con_venta:,} SKU con venta ({pct_con_v:.1f}%) | "
+                f"{skus_sin_stock:,} SKU stock ≤ 0 ({pct_sin_stock:.1f}%) - Mes en Curso"
             ).replace(',', '.')
+
             if pct_v0 > 40:
                 st.error(mensaje_metricas)
             else:
