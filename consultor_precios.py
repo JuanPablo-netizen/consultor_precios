@@ -344,8 +344,8 @@ if st.session_state.vista_actual == "listado":
                 col_venta_mes: 'U. VENDIDAS', 'observaciones': 'OBSERVACIONES'
             }
             df_vista = df_mostrar[[c for c in mapa_columnas.keys() if c in df_mostrar.columns]].rename(columns=mapa_columnas)
-            df_vista['STOCK'] = pd.to_numeric(df_vista['STOCK'], errors='coerce').fillna(0).astype(int)
             df_vista['PRECIO'] = pd.to_numeric(df_vista['PRECIO'], errors='coerce').fillna(0)
+            df_vista['STOCK'] = pd.to_numeric(df_vista['STOCK'], errors='coerce').fillna(0).astype(int)
             df_vista['U. VENDIDAS'] = pd.to_numeric(df_vista['U. VENDIDAS'], errors='coerce').fillna(0).astype(int)
             
             # --- NUEVO: Limpieza de la columna OBSERVACIONES para evitar textos 'nan' ---
