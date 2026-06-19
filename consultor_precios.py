@@ -158,10 +158,13 @@ def generar_pdf_completo(image_bytes, df, titulo, advertencias=""):
     return bytes(pdf.output(dest='S'))
 
 def generar_pdf(df, depto, subcat, filtro_venta):
-    col_widths = [20, 80, 30, 30, 15, 25, 25, 25] # <-- Se agrega un 25 extra al final
-    anchos_reales = col_widths[:len(df.columns)]  # <-- Nueva línea para saber cuántas columnas hay
-    total_width = sum(anchos_reales)              # <-- Suma dinámica
-    x_start = (279.4 - total_width) / 2  # Centrado basado en ancho Letter Landscape (279.4 mm)
+    # Definición exacta para las 9 columnas en milímetros (Suma total: 260 mm)
+    # [PRODUCTO, DESCRIPCIÓN, MARCA, TEMPORADA, STOCK, PRECIO, U.VENDIDAS, OBSERVACIONES, STOCK EN SALA]
+    col_widths = [18, 65, 25, 25, 15, 22, 20, 45, 25] 
+    
+    anchos_reales = col_widths[:len(df.columns)]  
+    total_width = sum(anchos_reales)              
+    x_start = (279.4 - total_width) / 2  # Centrado perfecto basado en el total real (Márgenes de ~9.7 mm)
 
     class PDFReport(FPDF):
         def header(self):
@@ -334,15 +337,21 @@ if st.session_state.vista_actual == "listado":
             else:
                 st.success(mensaje_metricas)
 
+            # --- MODIFICADO: Se añade 'observaciones' al final del mapa ---
             mapa_columnas = {
                 'producto': 'PRODUCTO', 'descripcion': 'DESCRIPCIÓN', 'marca': 'MARCA',
                 'temporada': 'TEMPORADA', 'stock': 'STOCK', 'nuevo precio': 'PRECIO',
-                col_venta_mes: 'U. VENDIDAS'
+                col_venta_mes: 'U. VENDIDAS', 'observaciones': 'OBSERVACIONES'
             }
             df_vista = df_mostrar[[c for c in mapa_columnas.keys() if c in df_mostrar.columns]].rename(columns=mapa_columnas)
             df_vista['STOCK'] = pd.to_numeric(df_vista['STOCK'], errors='coerce').fillna(0).astype(int)
             df_vista['PRECIO'] = pd.to_numeric(df_vista['PRECIO'], errors='coerce').fillna(0)
             df_vista['U. VENDIDAS'] = pd.to_numeric(df_vista['U. VENDIDAS'], errors='coerce').fillna(0).astype(int)
+            
+            # --- NUEVO: Limpieza de la columna OBSERVACIONES para evitar textos 'nan' ---
+            if 'OBSERVACIONES' in df_vista.columns:
+                df_vista['OBSERVACIONES'] = df_vista['OBSERVACIONES'].fillna('').astype(str).replace(['nan', 'NAN', 'None', 'SIN DATO'], '')
+                
             df_vista = df_vista.sort_values(by='STOCK', ascending=False).reset_index(drop=True)
 
             def efecto_cebra(row):
@@ -365,8 +374,11 @@ if st.session_state.vista_actual == "listado":
                     </div>
                 """.replace(',', '.'), unsafe_allow_html=True)
             with col_t2:
+                # --- MODIFICADO: Formateo de precio chileno y asignación para exportación ---
                 df_pdf = df_vista.copy()
+                df_pdf['PRECIO'] = df_pdf['PRECIO'].apply(lambda x: f"${int(x):,}".replace(",", ".") if x > 0 else "$0")
                 df_pdf['STOCK EN SALA'] = ""
+                
                 pdf_bytes = generar_pdf(df_pdf, f_depto, f_sub, f_venta_cero)
                 st.download_button(
                     label="📥 Descargar PDF",
