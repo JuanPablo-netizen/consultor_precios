@@ -352,7 +352,11 @@ if st.session_state.vista_actual == "listado":
             if 'OBSERVACIONES' in df_vista.columns:
                 df_vista['OBSERVACIONES'] = df_vista['OBSERVACIONES'].fillna('').astype(str).replace(['nan', 'NAN', 'None', 'SIN DATO'], '')
                 
-            df_vista = df_vista.sort_values(by='STOCK', ascending=False).reset_index(drop=True)
+            # --- MODIFICADO: Ordenamiento condicional según el filtro seleccionado ---
+            if f_obs_only:
+                df_vista = df_vista.sort_values(by='OBSERVACIONES', ascending=True).reset_index(drop=True)
+            else:
+                df_vista = df_vista.sort_values(by='STOCK', ascending=False).reset_index(drop=True)
 
             def efecto_cebra(row):
                 return ['background-color: #F8FAFC' if row.name % 2 == 0 else 'background-color: #FFFFFF' for _ in row]
