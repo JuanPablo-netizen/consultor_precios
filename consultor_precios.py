@@ -4,8 +4,98 @@ import requests
 import io
 import re
 import fitz
+import unicodedata
 from fpdf import FPDF
 from datetime import datetime
+import concurrent.futures
+
+
+def normalizar_texto_pdf(texto):
+    """
+    Normaliza el texto a NFC (forma precompuesta) para evitar que
+    fpdf2 falle con FPDFUnicodeEncodingException cuando el texto
+    viene en NFD (por ejemplo, nombres de carpetas/archivos de Drive
+    creados desde macOS, donde "ó" se guarda como "o" + acento suelto).
+    """
+    if texto is None:
+        return texto
+    return unicodedata.normalize('NFC', str(texto))
+
+# --- 0. CONEXIÓN A GOOGLE DRIVE (carpetas públicas, sin cuenta de servicio) ---
+# Requisitos:
+#  1) En Google Cloud Console: habilita "Google Drive API" y crea una API Key
+#     (Credenciales > Crear credenciales > Clave de API). Restríngela a "Drive API".
+#  2) Las carpetas PDF / CATALOGOS / INSTRUCTIVOS (y todo su contenido) deben estar
+#     compartidas como "Cualquiera con el enlace: Lector", igual que tu archivo de precios.
+#  3) Reemplaza los 3 valores de abajo con tus datos reales.
+
+DRIVE_API_KEY = "AIzaSyAy8ii9mbAfcgM5DJgDHNEQ42hAQYH4UGQ"
+
+# ID de la carpeta "CATALOGOS" (se obtiene abriendo la carpeta en Drive y copiando
+# el código que aparece al final de la URL: drive.google.com/drive/folders/AQUI_VA_EL_ID)
+ID_CARPETA_CATALOGOS = "136DkzTJ0YUgPWWQz8W9EKhz08qNKd0pP"
+
+# ID de la carpeta "INSTRUCTIVOS"
+ID_CARPETA_INSTRUCTIVOS = "1rUSPtruuUT3j00r-nauGq0XGNMim786z"
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def listar_contenido_drive(folder_id):
+    """
+    Lista subcarpetas y archivos PDF dentro de una carpeta pública de Drive,
+    usando solo la API Key (sin login ni cuenta de servicio).
+    Devuelve (carpetas, archivos), cada uno como lista de dicts {id, name}.
+    """
+    url = "https://www.googleapis.com/drive/v3/files"
+    params = {
+        "q": f"'{folder_id}' in parents and trashed = false",
+        "fields": "files(id, name, mimeType)",
+        "orderBy": "folder,name",
+        "pageSize": 200,
+        "key": DRIVE_API_KEY,
+    }
+    r = requests.get(url, params=params, timeout=20)
+    r.raise_for_status()
+    items = r.json().get("files", [])
+    carpetas = [i for i in items if i["mimeType"] == "application/vnd.google-apps.folder"]
+    archivos = [i for i in items if i["mimeType"] == "application/pdf"]
+    return carpetas, archivos
+
+
+def descargar_pdf_drive(file_id):
+    """Descarga los bytes de un PDF público de Drive (mismo patrón de URL que ya usas)."""
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    return r.content
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def listar_pdfs_recursivo(folder_id, ruta=""):
+    """
+    Recorre recursivamente una carpeta de Drive (y todas sus subcarpetas)
+    y devuelve la lista completa de PDFs encontrados, cada uno con la ruta
+    de subcarpetas en la que está ubicado (para mostrarla como referencia).
+    Las subcarpetas se consultan en paralelo para acelerar la primera carga.
+    """
+    carpetas, archivos = listar_contenido_drive(folder_id)
+    resultado = [{"id": a["id"], "name": a["name"], "ruta": ruta} for a in archivos]
+
+    if carpetas:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futuros = {
+                executor.submit(
+                    listar_pdfs_recursivo,
+                    c["id"],
+                    f"{ruta} / {c['name']}" if ruta else c["name"]
+                ): c
+                for c in carpetas
+            }
+            for futuro in concurrent.futures.as_completed(futuros):
+                resultado.extend(futuro.result())
+
+    return resultado
+
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
@@ -103,16 +193,53 @@ def cargar_base_precios():
     response = requests.get(url)
     return pd.read_excel(io.BytesIO(response.content))
 
+def combinar_pdfs(lista_pdfs_bytes):
+    """Combina varios PDFs (uno por hoja) en un solo archivo PDF final."""
+    combinado = fitz.open()
+    for pdf_bytes in lista_pdfs_bytes:
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc_temp:
+            combinado.insert_pdf(doc_temp)
+    data = combinado.tobytes()
+    combinado.close()
+    return data
+
+
 def generar_pdf_simple(image_bytes, titulo):
-    pdf = FPDF(orientation='L', unit='mm', format='Letter')
+    titulo = normalizar_texto_pdf(titulo)
+
+    # Detectar la orientación real de la imagen (hoja sin códigos/tabla)
+    # para no forzar siempre horizontal.
+    try:
+        pix_tmp = fitz.Pixmap(image_bytes)
+        img_w, img_h = pix_tmp.width, pix_tmp.height
+    except Exception:
+        img_w, img_h = 1, 1  # fallback neutro, no debería pasar
+
+    orientacion = 'P' if img_h > img_w else 'L'
+
+    pdf = FPDF(orientation=orientacion, unit='mm', format='Letter')
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(0, 10, titulo, ln=True, align='C')
     pdf.ln(5)
-    pdf.image(io.BytesIO(image_bytes), x=10, y=25, w=250, type='PNG')
+
+    # Escalar la imagen para que quepa completa y centrada,
+    # respetando su proporción original, sea vertical u horizontal.
+    margen = 10
+    y_img = 25
+    max_w = pdf.w - 2 * margen
+    max_h = pdf.h - y_img - margen
+
+    escala = min(max_w / img_w, max_h / img_h)
+    w_final = img_w * escala
+    h_final = img_h * escala
+    x_final = (pdf.w - w_final) / 2
+
+    pdf.image(io.BytesIO(image_bytes), x=x_final, y=y_img, w=w_final, h=h_final, type='PNG')
     return bytes(pdf.output(dest='S'))
 
 def generar_pdf_completo(image_bytes, df, titulo, advertencias=""):
+    titulo = normalizar_texto_pdf(titulo)
     pdf = FPDF(orientation='L', unit='mm', format='Letter')
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
@@ -225,8 +352,8 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("---")
-    st.markdown("### ⏰ Gestiona Instructivos y Catálogos")
-    if st.button("⚙️ Procesa Stock Instructivos y Catálogos", use_container_width=True):
+    st.markdown("### ⏰ Archivos PDF")
+    if st.button("⚙️ Revisa Catálogos e Instructivos", use_container_width=True):
         st.session_state.vista_actual = "instructivos"
         st.rerun()
 
@@ -270,7 +397,7 @@ if st.session_state.vista_actual == "listado":
             lista_marcas = sorted([str(x) for x in df_s['marca'].unique() if str(x) != "SIN DATO"])
             f_marca = st.selectbox("Marca", ["Todas"] + lista_marcas)
 
-        f2_c1, f2_c2, f2_c3 = st.columns(3)
+        f2_c1, f2_c2, f2_c3, f2_c4 = st.columns(4)
         with f2_c1:
             lista_temp = sorted([str(x) for x in df_s['temporada'].unique() if str(x) != "SIN DATO"])
             f_temp = st.selectbox("Temporada", ["Todas"] + lista_temp)
@@ -279,12 +406,24 @@ if st.session_state.vista_actual == "listado":
         with f2_c3:
             lista_precios = sorted([float(x) for x in df_s['nuevo precio'].unique() if pd.to_numeric(x, errors='coerce') > 0])
             f_precio = st.selectbox("Precio", ["Todos"] + lista_precios, format_func=lambda x: f"${int(x):,}".replace(",", ".") if x != "Todos" else x)
+        with f2_c4:
+            # Lista los valores reales que existen en la columna 'observaciones'
+            # (pueden ser texto o números como "0", "100", etc.), en vez de
+            # solo un sí/no genérico.
+            obs_validas = df_s['observaciones'].dropna().astype(str).str.strip()
+            obs_validas = obs_validas[
+                (obs_validas != '') &
+                (obs_validas.str.upper() != 'SIN DATO') &
+                (obs_validas.str.lower() != 'nan')
+            ]
+            lista_obs = sorted(obs_validas.unique().tolist())
+            opciones_obs = ["Todas", "Solo sin Observaciones"] + lista_obs
+            f_obs = st.selectbox("Observaciones", opciones_obs)
 
-        col_c1, col_c2 = st.columns(2)
+        col_c1, = st.columns(1)
         with col_c1:
             f_pareto = st.checkbox("80% del Stock")
-        with col_c2:
-            f_obs_only = st.checkbox("Solo con Observaciones")
+
         f_buscar = st.text_input("🔎 Busqueda Específica", placeholder="Ej: Vest, Denim, etc.")
 
         df_mostrar = df_s.copy()
@@ -301,12 +440,15 @@ if st.session_state.vista_actual == "listado":
         elif f_venta_cero == "Solo con Venta":
             df_mostrar = df_mostrar[df_mostrar[col_venta_mes] > 0]
         
-        if f_obs_only:
+        if f_obs == "Solo sin Observaciones":
             df_mostrar = df_mostrar[
-                (df_mostrar['observaciones'].notna()) & 
-                (df_mostrar['observaciones'].astype(str).str.upper() != 'SIN DATO') &
-                (df_mostrar['observaciones'].astype(str).str.lower() != 'nan')
+                (df_mostrar['observaciones'].isna()) |
+                (df_mostrar['observaciones'].astype(str).str.upper() == 'SIN DATO') |
+                (df_mostrar['observaciones'].astype(str).str.lower() == 'nan') |
+                (df_mostrar['observaciones'].astype(str).str.strip() == '')
             ]
+        elif f_obs != "Todas":
+            df_mostrar = df_mostrar[df_mostrar['observaciones'].astype(str).str.strip() == f_obs]
         
         if f_pareto:
             df_mostrar = df_mostrar.sort_values(by='stock', ascending=False)
@@ -353,7 +495,7 @@ if st.session_state.vista_actual == "listado":
                 df_vista['OBSERVACIONES'] = df_vista['OBSERVACIONES'].fillna('').astype(str).replace(['nan', 'NAN', 'None', 'SIN DATO'], '')
                 
             # --- MODIFICADO: Ordenamiento condicional según el filtro seleccionado ---
-            if f_obs_only:
+            if f_obs != "Todas":
                 df_vista = df_vista.sort_values(by='OBSERVACIONES', ascending=True).reset_index(drop=True)
             else:
                 df_vista = df_vista.sort_values(by='STOCK', ascending=False).reset_index(drop=True)
@@ -405,21 +547,84 @@ if st.session_state.vista_actual == "listado":
 # --- VISTA 2: INSTRUCTIVOS PDF ---
 # =======================================================
 elif st.session_state.vista_actual == "instructivos":
-    st.title("⚙️ Procesa Stock de Instructivos y Catalogos")
+    st.title("⚙️ Revisa Catálogos e Instructivos")
 
-    archivo_pdf = st.file_uploader("Sube tu archivo PDF", type="pdf", key="uploader_unico")
+    if "tipo_pdf" not in st.session_state:
+        st.session_state.tipo_pdf = None
+    if "pdf_bytes" not in st.session_state:
+        st.session_state.pdf_bytes = None
+        st.session_state.pdf_nombre = None
 
-    if archivo_pdf:
+    # --- PASO 1: elegir si es Catálogo o Instructivo ---
+    if st.session_state.tipo_pdf is None:
+        st.markdown("### Selecciona una opción")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📘 Catálogo", use_container_width=True, key="btn_tipo_catalogo"):
+                st.session_state.tipo_pdf = "catalogo"
+                st.rerun()
+        with col2:
+            if st.button("📗 Instructivo", use_container_width=True, key="btn_tipo_instructivo"):
+                st.session_state.tipo_pdf = "instructivo"
+                st.rerun()
+
+    # --- PASO 2: elegir directamente el PDF entre todos los que hay en Catálogo/Instructivo ---
+    elif st.session_state.pdf_bytes is None:
+        etiqueta = "Catálogo" if st.session_state.tipo_pdf == "catalogo" else "Instructivo"
+        st.markdown(f"#### 📂 Elige el archivo de: {etiqueta}")
+
+        if st.button("🔄 Cambiar tipo (Catálogo/Instructivo)", key="btn_cambiar_tipo"):
+            st.session_state.tipo_pdf = None
+            st.rerun()
+
+        carpeta_raiz = ID_CARPETA_CATALOGOS if st.session_state.tipo_pdf == "catalogo" else ID_CARPETA_INSTRUCTIVOS
+
+        try:
+            with st.spinner("Buscando archivos en Drive..."):
+                pdfs = listar_pdfs_recursivo(carpeta_raiz)
+        except Exception as e:
+            st.error(f"🚨 No se pudo leer la carpeta de Drive. Revisa la API Key y los permisos.\n\nDetalle: {e}")
+            pdfs = []
+
+        if not pdfs:
+            st.warning("No se encontraron archivos PDF en esta carpeta.")
+        else:
+            opciones = [f"{p['ruta']} / {p['name']}" if p['ruta'] else p['name'] for p in pdfs]
+            seleccion = st.selectbox(
+                "Selecciona el PDF a cargar:",
+                ["-- Selecciona --"] + opciones,
+                key="sel_pdf_directo"
+            )
+            if seleccion != "-- Selecciona --":
+                idx = opciones.index(seleccion)
+                elegido = pdfs[idx]
+                with st.spinner(f"Cargando '{elegido['name']}'..."):
+                    st.session_state.pdf_bytes = descargar_pdf_drive(elegido["id"])
+                    st.session_state.pdf_nombre = elegido["name"]
+                    st.rerun()
+
+    # --- PASO 3: procesar el PDF ya cargado desde Drive (lógica original, sin cambios) ---
+    if st.session_state.pdf_bytes is not None:
+        if st.button("🔄 Elegir otro PDF", key="btn_otro_pdf"):
+            st.session_state.pdf_bytes = None
+            st.session_state.pdf_nombre = None
+            st.rerun()
+
+        archivo_pdf_bytes = st.session_state.pdf_bytes
+        archivo_pdf_nombre = st.session_state.pdf_nombre
+
         df_base = cargar_base_precios()
         df_base.columns = df_base.columns.str.strip()
         df_base['PRODUCTO'] = df_base['PRODUCTO'].astype(str)
 
-        doc = fitz.open(stream=archivo_pdf.read(), filetype="pdf")
-        nombre = archivo_pdf.name.replace(".pdf", "")
+        doc = fitz.open(stream=archivo_pdf_bytes, filetype="pdf")
+        nombre = archivo_pdf_nombre.replace(".pdf", "")
         # Sanitizamos el nombre para evitar problemas de claves
         nombre_limpio = "".join(filter(str.isalnum, nombre))
 
-        st.markdown("<p style='font-size: 16px; font-weight: 600; color: #666; margin-bottom: -5px;'>👇 Selecciona cada hoja para ver los stock</p>", unsafe_allow_html=True)
+        pdfs_generados = []  # aquí se junta el PDF de cada hoja para el descargable combinado
+        boton_descarga_todo = st.empty()
+        st.markdown("<p style='font-size: 16px; font-weight: 600; color: #666; margin-bottom: -5px;'>👇 Selecciona cada hoja del archivo cargado</p>", unsafe_allow_html=True)
 
         tabs = st.tabs([f":red[Hoja {idx+1}]" for idx in range(len(doc))])
 
@@ -468,6 +673,39 @@ elif st.session_state.vista_actual == "instructivos":
                                     'cy': (r.y0 + r.y1) / 2,
                                     'marcada': False
                                 })
+
+                        # 1b. Detectar también las cajas "SIN FOTO" (rectángulos dibujados
+                        # sin imagen real embebida). Sin esto, un producto que aún no tiene
+                        # foto nunca puede recibir el círculo VTA 0 porque no existe ninguna
+                        # "imagen" a la cual asociarlo.
+                        def _se_superpone(r1, r2, tol=5):
+                            return not (
+                                r1[2] < r2[0] - tol or r1[0] > r2[2] + tol or
+                                r1[3] < r2[1] - tol or r1[1] > r2[3] + tol
+                            )
+
+                        rects_ya_usados = [(i['x0'], i['y0'], i['x1'], i['y1']) for i in imagenes_data]
+                        try:
+                            dibujos_pagina = page.get_drawings()
+                        except Exception:
+                            dibujos_pagina = []
+
+                        for d in dibujos_pagina:
+                            rect_dibujo = d.get('rect')
+                            if rect_dibujo is None:
+                                continue
+                            if rect_dibujo.width > 80 and rect_dibujo.height > 80:
+                                candidato = (rect_dibujo.x0, rect_dibujo.y0, rect_dibujo.x1, rect_dibujo.y1)
+                                if not any(_se_superpone(candidato, ru) for ru in rects_ya_usados):
+                                    imagenes_data.append({
+                                        'rect': rect_dibujo,
+                                        'x0': rect_dibujo.x0, 'y0': rect_dibujo.y0,
+                                        'x1': rect_dibujo.x1, 'y1': rect_dibujo.y1,
+                                        'cx': (rect_dibujo.x0 + rect_dibujo.x1) / 2,
+                                        'cy': (rect_dibujo.y0 + rect_dibujo.y1) / 2,
+                                        'marcada': False
+                                    })
+                                    rects_ya_usados.append(candidato)
 
                         # 2. Detectar layout mirando dónde está el TEXTO con códigos
                         page_width = page.rect.width
@@ -559,6 +797,8 @@ elif st.session_state.vista_actual == "instructivos":
                                             mapa_lateral[cod] = fila[idx]
 
                         # 5. Procesar cada código con venta 0
+                        codigos_marcados = set()
+
                         for c in codigos_cero:
 
                             if es_layout_lateral:
@@ -568,6 +808,7 @@ elif st.session_state.vista_actual == "instructivos":
                                     if not img['marcada']:
                                         img['marcada'] = True
                                         dibujar_vta0(page, img['rect'])
+                                        codigos_marcados.add(c)
 
                             else:
                                 # TIPO A (grilla): imagen ARRIBA en la misma columna X
@@ -594,8 +835,39 @@ elif st.session_state.vista_actual == "instructivos":
                                     if mejor:
                                         mejor['marcada'] = True
                                         dibujar_vta0(page, mejor['rect'])
+                                        codigos_marcados.add(c)
 
                                     break  # siguiente código
+
+                        # 6. PASE DE RESPALDO: para los códigos que no calzaron con las reglas
+                        # estrictas de arriba (columna exacta / mapa lateral), se les asigna
+                        # la imagen o caja "SIN FOTO" libre más cercana a su texto, sin
+                        # restricciones de layout. Esto evita dejar productos sin marcar.
+                        codigos_pendientes = [c for c in codigos_cero if c not in codigos_marcados]
+
+                        for c in codigos_pendientes:
+                            bloque_codigo = next((b for b in bloques_texto if str(c) in b[4]), None)
+                            if not bloque_codigo:
+                                continue
+
+                            txt_cx = (bloque_codigo[0] + bloque_codigo[2]) / 2
+                            txt_cy = (bloque_codigo[1] + bloque_codigo[3]) / 2
+
+                            mejor = None
+                            min_dist = float('inf')
+                            for img in imagenes_data:
+                                if img['marcada']:
+                                    continue
+                                dist = math.hypot(img['cx'] - txt_cx, img['cy'] - txt_cy)
+                                if dist < min_dist:
+                                    min_dist = dist
+                                    mejor = img
+
+                            # Límite razonable para no asignar a algo lejano y equivocado
+                            if mejor and min_dist < page_width * 0.35:
+                                mejor['marcada'] = True
+                                dibujar_vta0(page, mejor['rect'])
+                                codigos_marcados.add(c)
 
                 # Generar PDF
                 pix = page.get_pixmap()
@@ -616,12 +888,14 @@ elif st.session_state.vista_actual == "instructivos":
                 else:
                     pdf_data = generar_pdf_simple(imagen_bytes, f"{nombre} - Hoja {idx_tab+1}")
 
+                pdfs_generados.append(pdf_data)
+
                 col_titulo, col_boton = st.columns([3, 1])
                 with col_titulo:
                     st.markdown(f"<h3 style='color: #ff4b4b;'>Detalle Hoja {idx_tab+1}</h3>", unsafe_allow_html=True)
                 with col_boton:
                     st.download_button(
-                        label="📥 Descargarlo en PDF",
+                        label="📥 Descarga en PDF sólo esta hoja",
                         data=pdf_data,
                         file_name=f"{nombre}_hoja_{idx_tab+1}.pdf",
                         mime="application/pdf",
@@ -683,8 +957,23 @@ elif st.session_state.vista_actual == "instructivos":
                     else:
                         if not codigos_encontrados:
                             st.warning("No se detectaron códigos en esta página.")
+
+        if pdfs_generados:
+            pdf_combinado = combinar_pdfs(pdfs_generados)
+            boton_descarga_todo.download_button(
+                label=f"📥 Descargar todo el archivo en PDF",
+                data=pdf_combinado,
+                file_name=f"{nombre}_completo.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key=f"dl_todo_{nombre_limpio}"
+            )
+
     if st.button("⬅️ VOLVER AL CONSULTOR", use_container_width=True):
         st.session_state.vista_actual = "escaner"
+        st.session_state.tipo_pdf = None
+        st.session_state.pdf_bytes = None
+        st.session_state.pdf_nombre = None
         st.rerun()
 
 # =======================================================

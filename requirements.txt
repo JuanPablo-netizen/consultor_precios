@@ -8,3 +8,4 @@ numpy
 python-calamine
 fpdf2
 PyMuPDF
+streamlit-keyup
