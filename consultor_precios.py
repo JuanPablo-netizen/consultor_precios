@@ -22,6 +22,25 @@ def normalizar_texto_pdf(texto):
         return texto
     return unicodedata.normalize('NFC', str(texto))
 
+# --- Patrones de texto para agrupar productos según su Descripción ---
+# Lista editable: se busca cada término (en orden) dentro de la descripción
+# en mayúsculas; el PRIMERO que coincide define el "tipo" del producto.
+# Ajusta/agrega términos según lo que realmente aparezca en tus descripciones
+# (ej. dentro de "POLERONES": CAPUCHA, CUELLO REDONDO, etc.).
+PATRONES_DESCRIPCION = [
+    "CON CAPUCHA", "CAPUCHA", "CUELLO REDONDO", "CUELLO V", "CUELLO ALTO",
+    "CIERRE COMPLETO", "MEDIO CIERRE", "MANGA LARGA", "MANGA CORTA", "SIN MANGA",
+    "OVERSIZE", "SLIM", "REGULAR FIT", "JOGGER", "CARGO", "SKINNY", "RECTO", "WIDE LEG",
+]
+
+def detectar_patron_descripcion(descripcion):
+    """Extrae y agrupa por las primeras 4 palabras de la descripción."""
+    texto = str(descripcion).strip().upper()
+    palabras = texto.split()
+    if not palabras:
+        return "SIN DESCRIPCIÓN"
+    return " ".join(palabras[:4])
+
 # --- 0. CONEXIÓN A GOOGLE DRIVE (carpetas públicas, sin cuenta de servicio) ---
 # Requisitos:
 #  1) En Google Cloud Console: habilita "Google Drive API" y crea una API Key
@@ -714,6 +733,13 @@ elif st.session_state.vista_actual == "grafico":
             # por una subcategoría específica (mostraría un solo segmento).
             if g_subcat == "Todas":
                 graficos.append((df_g, 'subcategoria', '📦 Stock por Subcategoría', {}, None))
+            elif 'descripcion' in df_g.columns:
+                df_patron = df_g.copy()
+                df_patron['patron_detectado'] = df_patron['descripcion'].apply(detectar_patron_descripcion)
+                graficos.append((
+                    df_patron, 'patron_detectado', '🔎 Stock por Tipo de Producto', {},
+                    "Agrupación automática considerando las primeras 4 palabras de la descripción"
+                ))
 
             graficos.append((df_g, 'temporada', '🗓️ Stock por Temporada', {}, None))
 
@@ -770,7 +796,7 @@ elif st.session_state.vista_actual == "grafico":
                         if excluidos:
                             etiqueta_campo = etiquetas_campo.get(campo, campo)
                             st.caption(
-                                f"En vista la mayor participación de stock de {etiqueta_campo}"
+                                f"👁️ En vista la mayor participación de stock de {etiqueta_campo}"
                             )
 
         else:
