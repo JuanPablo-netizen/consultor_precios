@@ -5,6 +5,7 @@ import io
 import re
 import fitz
 import unicodedata
+import plotly.express as px
 from fpdf import FPDF
 from datetime import datetime
 import concurrent.futures
@@ -350,6 +351,9 @@ with st.sidebar:
     if st.button("📦 Ver Listado de Stock", use_container_width=True):
         st.session_state.vista_actual = "listado"
         st.rerun()
+    if st.button("📊 Análisis de Stock", use_container_width=True):
+        st.session_state.vista_actual = "grafico"
+        st.rerun()
 
     st.markdown("---")
     st.markdown("### ⏰ Archivos PDF")
@@ -542,6 +546,277 @@ if st.session_state.vista_actual == "listado":
             st.rerun()
     else:
         st.error("No se pudo cargar la base de datos.")
+
+# =======================================================
+# --- VISTA 1.5: GRÁFICO DE STOCK (TORTAS MODERNAS) ---
+# =======================================================
+elif st.session_state.vista_actual == "grafico":
+    st.markdown("<h3 style='text-align: center; color: #D32F2F; font-weight: 900;'>📊 GRÁFICO DE STOCK</h3>", unsafe_allow_html=True)
+
+    df_raw = obtener_datos()
+
+    if df_raw is not None:
+        df = df_raw.copy()
+
+        hoy = datetime.now()
+        col_venta_mes = f"ventas {hoy.strftime('%m')}"
+
+        cols_texto = ['linea', 'departamento', 'subcategoria', 'temporada', 'marca']
+        for c in cols_texto:
+            df[c] = df[c].astype(str).str.strip().str.upper().replace(['NAN', 'NONE', 'N/A', ''], 'SIN DATO')
+
+        # --- Filtros: Línea, Departamento y Subcategoría (en cascada) ---
+        g_c1, g_c2, g_c3 = st.columns(3)
+        with g_c1:
+            lista_lineas = sorted([str(x) for x in df['linea'].unique() if str(x) != "SIN DATO"])
+            g_linea = st.selectbox("Línea", ["Todas"] + lista_lineas, key="g_linea")
+        with g_c2:
+            df_l = df if g_linea == "Todas" else df[df['linea'] == g_linea]
+            lista_deptos = sorted([str(x) for x in df_l['departamento'].unique() if str(x) != "SIN DATO"])
+            g_depto = st.selectbox("Departamento", ["Todos"] + lista_deptos, key="g_depto")
+        with g_c3:
+            df_d = df_l if g_depto == "Todos" else df_l[df_l['departamento'] == g_depto]
+            lista_subcats = sorted([str(x) for x in df_d['subcategoria'].unique() if str(x) != "SIN DATO"])
+            g_subcat = st.selectbox("Subcategoría", ["Todas"] + lista_subcats, key="g_subcat")
+
+        df_g = df_d if g_subcat == "Todas" else df_d[df_d['subcategoria'] == g_subcat]
+        df_g = df_g.copy()
+        df_g['stock'] = pd.to_numeric(df_g['stock'], errors='coerce').fillna(0)
+
+        # Universo completo (incluye stock negativo, cero y positivo), capturado
+        # antes de filtrar por stock > 0, para el panel de "códigos con stock
+        # crítico" más abajo.
+        df_stock_completo = df_g.copy()
+
+        df_g = df_g[df_g['stock'] > 0]
+
+        total_stock = df_g['stock'].sum()
+
+        if total_stock > 0:
+            total_skus_g = len(df_g)
+            mensaje_g = (
+                f"📦 {int(total_stock):,} unidades en stock | {total_skus_g:,} SKU con stock > 0"
+            ).replace(",", ".")
+            st.success(mensaje_g)
+
+            import plotly.colors as pc
+
+            def generar_colores_por_ranking(valores, invertir=False):
+                """
+                Semáforo en degradé: a MAYOR % del total, más VERDE;
+                a MENOR %, más ROJO. El color se calcula en proporción real
+                al valor de cada porción (no solo por su posición/ranking),
+                normalizado dentro del rango min-max de ese mismo gráfico.
+                invertir=True da vuelta la lógica (mayor % = más ROJO), útil
+                para métricas donde un valor alto es negativo, como Venta 0.
+                """
+                n = len(valores)
+                if n <= 1:
+                    # Mismo formato rgb(...) que usa pc.sample_colorscale más abajo,
+                    # para que texto_con_contraste pueda parsearlo sin error.
+                    return ['rgb(46,125,50)'] if not invertir else ['rgb(183,28,28)']
+                v_max, v_min = max(valores), min(valores)
+                if v_max == v_min:
+                    color_plano = 'rgb(183,28,28)' if invertir else 'rgb(139,195,74)'
+                    return [color_plano] * n
+                puntos = [(v - v_min) / (v_max - v_min) for v in valores]  # mayor valor -> 1.0 (verde)
+                if invertir:
+                    puntos = [1 - p for p in puntos]
+                return pc.sample_colorscale('RdYlGn', puntos)
+
+            def texto_con_contraste(colores_rgb):
+                """
+                Elige negro o blanco para el texto de cada porción según qué tan
+                clara u oscura sea su color de fondo, para que el % siempre sea
+                legible (los tonos claros del degradé, como el amarillo pálido,
+                necesitan texto negro; los oscuros necesitan texto blanco).
+                """
+                resultado = []
+                for c in colores_rgb:
+                    numeros = re.findall(r'[\d.]+', c)
+                    r, g, b = [float(n) for n in numeros[:3]]
+                    luminancia = 0.299 * r + 0.587 * g + 0.114 * b
+                    resultado.append('#000000' if luminancia > 160 else '#FFFFFF')
+                return resultado
+
+            def crear_donut(data, nombre_col, titulo, max_categorias=6, mostrar_vacios=False, invertir_colores=False):
+                # mostrar_vacios=True incluye categorías sin stock (útil para que
+                # el gráfico de rango de precio muestre los 6 rangos siempre).
+                agrupado = data.groupby(nombre_col, observed=not mostrar_vacios)['stock'].sum().reset_index()
+                agrupado = agrupado.sort_values('stock', ascending=False).reset_index(drop=True)
+                # Ya no se agrupa en "OTROS": las categorías menos representativas
+                # (baja participación en stock) simplemente se excluyen del gráfico
+                # y se listan en un pie de página, en vez de mezclarse en una
+                # porción heterogénea que ensucia la torta.
+                excluidos = []
+                if len(agrupado) > max_categorias:
+                    excluidos = agrupado.iloc[max_categorias:][nombre_col].tolist()
+                    agrupado = agrupado.iloc[:max_categorias].reset_index(drop=True)
+
+                colores = generar_colores_por_ranking(agrupado['stock'].tolist(), invertir=invertir_colores)
+                colores_texto = texto_con_contraste(colores)
+
+                # Se agrega el % directamente en el nombre de cada categoría para
+                # que la leyenda muestre "NOMBRE (XX.X%)" y sea más fácil de leer.
+                total_grupo = agrupado['stock'].sum()
+                agrupado['etiqueta'] = agrupado.apply(
+                    lambda r: f"{r[nombre_col]} ({(r['stock'] / total_grupo * 100):.1f}%)", axis=1
+                )
+
+                fig = px.pie(
+                    agrupado, values='stock', names='etiqueta', hole=0.55
+                )
+                # sort=False asegura que el orden de las porciones coincida exactamente
+                # con el orden (mayor→menor) usado para calcular los colores.
+                fig.update_traces(
+                    sort=False,
+                    marker=dict(colors=colores, line=dict(color='#FFFFFF', width=2)),
+                    textposition='inside',
+                    insidetextorientation='radial',
+                    textinfo='percent',
+                    texttemplate='%{percent:.1%}',
+                    textfont=dict(size=12, color=colores_texto),
+                    hovertemplate='%{label}: %{value:,.0f} unidades (%{percent})<extra></extra>'
+                )
+                fig.update_layout(
+                    title=dict(
+                        text=titulo, x=0.5, xanchor='center', y=0.98, yanchor='top',
+                        font=dict(size=15, family="Arial, sans-serif", color="#333333")
+                    ),
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h", yanchor="top", y=-0.05, xanchor="center", x=0.5,
+                        font=dict(size=10), itemwidth=40
+                    ),
+                    uniformtext=dict(minsize=9, mode='hide'),
+                    margin=dict(t=55, b=10, l=10, r=10),
+                    height=380,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
+                return fig, excluidos
+
+            # --- Lista dinámica de gráficos a mostrar ---
+            # Cada elemento es (data, columna, título, kwargs para crear_donut)
+            graficos = []
+
+            # El gráfico "Stock por Línea" se oculta cuando ya se filtró por una línea
+            # específica, porque en ese caso mostraría un solo segmento (100%) sin valor.
+            if g_linea == "Todas":
+                graficos.append((df_g, 'linea', '👕 Stock por Línea', {}))
+
+            # Mismo criterio para "Stock por Departamento": se oculta si ya se
+            # filtró por un departamento específico.
+            if g_depto == "Todos":
+                graficos.append((df_g, 'departamento', '🏬 Stock por Departamento', {}))
+
+            # Mismo criterio: "Stock por Subcategoría" se oculta si ya se filtró
+            # por una subcategoría específica (mostraría un solo segmento).
+            if g_subcat == "Todas":
+                graficos.append((df_g, 'subcategoria', '📦 Stock por Subcategoría', {}))
+
+            graficos.append((df_g, 'temporada', '🗓️ Stock por Temporada', {}))
+
+            df_g['estado_venta'] = df_g[col_venta_mes].apply(
+                lambda x: 'CON VENTA' if pd.to_numeric(x, errors='coerce') > 0 else 'SIN VENTA (0)'
+            )
+            graficos.append((df_g, 'estado_venta', '📉 Venta 0 Total', {}))
+
+            # Desglose por temporada, solo de los productos sin venta (venta 0),
+            # para verlo justo al lado del de "Venta 0 Total".
+            df_venta0 = df_g[df_g['estado_venta'] == 'SIN VENTA (0)']
+            if not df_venta0.empty:
+                graficos.append((df_venta0, 'temporada', '📉 Venta 0 por Temporada', {'invertir_colores': True}))
+
+            # --- Gráfico de Precios (por rangos) ---
+            df_precio = df_g.copy()
+            df_precio['nuevo precio'] = pd.to_numeric(df_precio['nuevo precio'], errors='coerce').fillna(0)
+            df_precio = df_precio[df_precio['nuevo precio'] > 0]
+            if not df_precio.empty:
+                bins = [0, 9990, 19990, 29990, 39990, 49990, float('inf')]
+                labels = [
+                    'Hasta $9.990', '$10.000 - $19.990', '$20.000 - $29.990',
+                    '$30.000 - $39.990', '$40.000 - $49.990', '$50.000 y más'
+                ]
+                df_precio['rango_precio'] = pd.cut(
+                    df_precio['nuevo precio'], bins=bins, labels=labels, include_lowest=True
+                )
+                # Con un departamento específico seleccionado hay menos datos, así que
+                # mostramos los 6 rangos completos (incluso los que quedan en 0). En la
+                # vista amplia por Línea, para evitar saturar la torta, priorizamos solo
+                # los rangos que sí concentran stock (los vacíos no se muestran).
+                graficos.append((
+                    df_precio, 'rango_precio', '💲 Stock por Rango de Precio',
+                    {'max_categorias': 6, 'mostrar_vacios': g_depto != "Todos"}
+                ))
+
+            # --- Renderizado en filas de 3 columnas ---
+            etiquetas_campo = {
+                'linea': 'línea', 'departamento': 'departamento', 'subcategoria': 'subcategoría',
+                'temporada': 'temporada', 'estado_venta': 'estado de venta', 'rango_precio': 'rango de precio',
+            }
+            for i in range(0, len(graficos), 3):
+                fila = graficos[i:i + 3]
+                cols = st.columns(len(fila))
+                for col, (data_g, campo, titulo, kwargs) in zip(cols, fila):
+                    with col:
+                        fig, excluidos = crear_donut(data_g, campo, titulo, **kwargs)
+                        st.plotly_chart(fig, use_container_width=True)
+                        if excluidos:
+                            etiqueta_campo = etiquetas_campo.get(campo, campo)
+                            st.caption(
+                                f"👁️ En vista la mayor participación de stock de {etiqueta_campo}"
+                            )
+
+        else:
+            st.warning("⚠️ No se encontró stock disponible para los filtros seleccionados.")
+
+        # --- Panel: Códigos con Stock Crítico (negativo, <5 unidades, en 0) ---
+        # Usa df_stock_completo (universo antes del filtro stock > 0) para poder
+        # contabilizar también los códigos en negativo y en cero.
+        total_codigos = df_stock_completo['producto'].nunique()
+        if total_codigos > 0:
+            st.markdown("<hr>", unsafe_allow_html=True)
+            cod_negativo = df_stock_completo.loc[df_stock_completo['stock'] < 0, 'producto'].nunique()
+            cod_menor_5 = df_stock_completo.loc[df_stock_completo['stock'] < 5, 'producto'].nunique()
+            cod_cero = df_stock_completo.loc[df_stock_completo['stock'] == 0, 'producto'].nunique()
+
+            df_critico = pd.DataFrame({
+                'categoria': ['Stock negativo', 'Stock < 5 unidades', 'Stock en 0'],
+                'cantidad': [cod_negativo, cod_menor_5, cod_cero],
+            })
+            df_critico['pct'] = df_critico['cantidad'] / total_codigos * 100
+            df_critico['etiqueta'] = df_critico.apply(
+                lambda r: f"{int(r['cantidad']):,} ({r['pct']:.1f}%)".replace(",", "."), axis=1
+            )
+
+            fig_critico = px.bar(
+                df_critico, x='cantidad', y='categoria', orientation='h',
+                text='etiqueta', color='categoria',
+                color_discrete_sequence=['#C62828', '#F9A825', '#455A64']
+            )
+            fig_critico.update_traces(textposition='outside', textfont=dict(size=12), cliponaxis=False)
+            fig_critico.update_layout(
+                title=dict(
+                    text=f"⚠️ Códigos con Stock Crítico (de {total_codigos:,} códigos)".replace(",", "."),
+                    x=0.5, xanchor='center',
+                    font=dict(size=15, family="Arial, sans-serif", color="#333333")
+                ),
+                showlegend=False,
+                xaxis_title=None, yaxis_title=None,
+                margin=dict(t=55, b=10, l=10, r=60),
+                height=280,
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
+            )
+            st.plotly_chart(fig_critico, use_container_width=True)
+
+    else:
+        st.error("No se pudo cargar la base de datos.")
+
+    if st.button("VOLVER AL CONSULTOR DE PRECIOS", use_container_width=True, key="volver_grafico"):
+        st.session_state.vista_actual = "escaner"
+        st.rerun()
 
 # =======================================================
 # --- VISTA 2: INSTRUCTIVOS PDF ---

@@ -9,3 +9,4 @@ python-calamine
 fpdf2
 PyMuPDF
 streamlit-keyup
+plotly
