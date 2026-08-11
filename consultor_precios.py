@@ -697,36 +697,39 @@ elif st.session_state.vista_actual == "grafico":
                 return fig, excluidos
 
             # --- Lista dinámica de gráficos a mostrar ---
-            # Cada elemento es (data, columna, título, kwargs para crear_donut)
+            # Cada elemento es (data, columna, título, kwargs para crear_donut, nota opcional)
             graficos = []
 
             # El gráfico "Stock por Línea" se oculta cuando ya se filtró por una línea
             # específica, porque en ese caso mostraría un solo segmento (100%) sin valor.
             if g_linea == "Todas":
-                graficos.append((df_g, 'linea', '👕 Stock por Línea', {}))
+                graficos.append((df_g, 'linea', '👕 Stock por Línea', {}, None))
 
             # Mismo criterio para "Stock por Departamento": se oculta si ya se
             # filtró por un departamento específico.
             if g_depto == "Todos":
-                graficos.append((df_g, 'departamento', '🏬 Stock por Departamento', {}))
+                graficos.append((df_g, 'departamento', '🏬 Stock por Departamento', {}, None))
 
             # Mismo criterio: "Stock por Subcategoría" se oculta si ya se filtró
             # por una subcategoría específica (mostraría un solo segmento).
             if g_subcat == "Todas":
-                graficos.append((df_g, 'subcategoria', '📦 Stock por Subcategoría', {}))
+                graficos.append((df_g, 'subcategoria', '📦 Stock por Subcategoría', {}, None))
 
-            graficos.append((df_g, 'temporada', '🗓️ Stock por Temporada', {}))
+            graficos.append((df_g, 'temporada', '🗓️ Stock por Temporada', {}, None))
 
             df_g['estado_venta'] = df_g[col_venta_mes].apply(
                 lambda x: 'CON VENTA' if pd.to_numeric(x, errors='coerce') > 0 else 'SIN VENTA (0)'
             )
-            graficos.append((df_g, 'estado_venta', '📉 Venta 0 Total', {}))
+            graficos.append((df_g, 'estado_venta', '📉 Venta 0 Total', {}, None))
 
             # Desglose por temporada, solo de los productos sin venta (venta 0),
             # para verlo justo al lado del de "Venta 0 Total".
             df_venta0 = df_g[df_g['estado_venta'] == 'SIN VENTA (0)']
             if not df_venta0.empty:
-                graficos.append((df_venta0, 'temporada', '📉 Venta 0 por Temporada', {'invertir_colores': True}))
+                graficos.append((
+                    df_venta0, 'temporada', '📉 Venta 0 por Temporada', {'invertir_colores': True},
+                    "Muestra participación de solo códigos sin venta este mes"
+                ))
 
             # --- Gráfico de Precios (por rangos) ---
             df_precio = df_g.copy()
@@ -747,7 +750,7 @@ elif st.session_state.vista_actual == "grafico":
                 # los rangos que sí concentran stock (los vacíos no se muestran).
                 graficos.append((
                     df_precio, 'rango_precio', '💲 Stock por Rango de Precio',
-                    {'max_categorias': 6, 'mostrar_vacios': g_depto != "Todos"}
+                    {'max_categorias': 6, 'mostrar_vacios': g_depto != "Todos"}, None
                 ))
 
             # --- Renderizado en filas de 3 columnas ---
@@ -758,14 +761,16 @@ elif st.session_state.vista_actual == "grafico":
             for i in range(0, len(graficos), 3):
                 fila = graficos[i:i + 3]
                 cols = st.columns(len(fila))
-                for col, (data_g, campo, titulo, kwargs) in zip(cols, fila):
+                for col, (data_g, campo, titulo, kwargs, nota) in zip(cols, fila):
                     with col:
                         fig, excluidos = crear_donut(data_g, campo, titulo, **kwargs)
                         st.plotly_chart(fig, use_container_width=True)
+                        if nota:
+                            st.caption(f"ℹ️ {nota}")
                         if excluidos:
                             etiqueta_campo = etiquetas_campo.get(campo, campo)
                             st.caption(
-                                f"👁️ En vista la mayor participación de stock de {etiqueta_campo}"
+                                f"En vista la mayor participación de stock de {etiqueta_campo}"
                             )
 
         else:
