@@ -551,7 +551,7 @@ if st.session_state.vista_actual == "listado":
 # --- VISTA 1.5: GRÁFICO DE STOCK (TORTAS MODERNAS) ---
 # =======================================================
 elif st.session_state.vista_actual == "grafico":
-    st.markdown("<h3 style='text-align: center; color: #D32F2F; font-weight: 900;'>📊 GRÁFICO DE STOCK</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center; color: #D32F2F; font-weight: 900;'>📊 ANÁLISIS DE STOCK</h3>", unsafe_allow_html=True)
 
     df_raw = obtener_datos()
 
