@@ -33,12 +33,49 @@ PATRONES_DESCRIPCION = [
     "OVERSIZE", "SLIM", "REGULAR FIT", "JOGGER", "CARGO", "SKINNY", "RECTO", "WIDE LEG",
 ]
 
+import re
+
+# Diccionario inteligente: unifica plurales (S opcional), abreviaturas y sinónimos
+SINONIMOS_Y_ABREVIATURAS = {
+    # --- Plurales y Variantes Frecuentes ---
+    r'\bSRAS?\b': 'SENORA',
+    r'\bSENORAS?\b': 'SENORA',
+    r'\bSEÑORAS?\b': 'SENORA',
+    r'\bENCAJES?\b': 'ENCAJE',
+    r'\bMANGAS?\b': 'MANGA',
+    r'\bALGODONES?\b': 'ALGODON',
+    r'\bESTAMPADAS?\b': 'ESTAMPADO',
+    r'\bESTAMPADOS\b': 'ESTAMPADO',
+    r'\bCOLORES?\b': 'COLOR',
+
+    # --- Abreviaturas Comunes ---
+    r'\bC/R\b': 'CUELLO REDONDO',
+    r'\bC/V\b': 'CUELLO V',
+    r'\bC/ALTO\b': 'CUELLO ALTO',
+    r'\bM/L\b': 'MANGA LARGA',
+    r'\bM/C\b': 'MANGA CORTA',
+    r'\bS/M\b': 'SIN MANGA',
+    r'\bPTL\b': 'PANTALON',
+    r'\bPOL\b': 'POLERA',
+    r'\bZAP\b': 'ZAPATO',
+    r'\bINF\b': 'INFANTIL',
+}
+
 def detectar_patron_descripcion(descripcion):
-    """Extrae y agrupa por las primeras 4 palabras de la descripción."""
+    """
+    Normaliza sinónimos, abreviaturas y plurales antes de cortar a 4 palabras.
+    """
     texto = str(descripcion).strip().upper()
+    
+    # 1. Aplicar normalización por regex
+    for patron, reemplazo in SINONIMOS_Y_ABREVIATURAS.items():
+        texto = re.sub(patron, reemplazo, texto)
+        
+    # 2. Split y tomar las primeras 4 palabras
     palabras = texto.split()
     if not palabras:
         return "SIN DESCRIPCIÓN"
+        
     return " ".join(palabras[:4])
 
 # --- 0. CONEXIÓN A GOOGLE DRIVE (carpetas públicas, sin cuenta de servicio) ---
@@ -738,7 +775,7 @@ elif st.session_state.vista_actual == "grafico":
                 df_patron['patron_detectado'] = df_patron['descripcion'].apply(detectar_patron_descripcion)
                 graficos.append((
                     df_patron, 'patron_detectado', '🔎 Stock por Tipo de Producto', {},
-                    "Agrupación automática considerando las primeras 4 palabras de la descripción"
+                    None
                 ))
 
             graficos.append((df_g, 'temporada', '🗓️ Stock por Temporada', {}, None))
@@ -781,8 +818,13 @@ elif st.session_state.vista_actual == "grafico":
 
             # --- Renderizado en filas de 3 columnas ---
             etiquetas_campo = {
-                'linea': 'línea', 'departamento': 'departamento', 'subcategoria': 'subcategoría',
-                'temporada': 'temporada', 'estado_venta': 'estado de venta', 'rango_precio': 'rango de precio',
+                'linea': 'línea', 
+                'departamento': 'departamento', 
+                'subcategoria': 'subcategoría',
+                'temporada': 'temporada', 
+                'estado_venta': 'estado de venta', 
+                'rango_precio': 'rango de precio',
+                'patron_detectado': 'tipo de producto'  # <--- AGREGAR ESTA LÍNEA
             }
             for i in range(0, len(graficos), 3):
                 fila = graficos[i:i + 3]
