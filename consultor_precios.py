@@ -22,20 +22,9 @@ def normalizar_texto_pdf(texto):
         return texto
     return unicodedata.normalize('NFC', str(texto))
 
-# --- Patrones de texto para agrupar productos según su Descripción ---
-# Lista editable: se busca cada término (en orden) dentro de la descripción
-# en mayúsculas; el PRIMERO que coincide define el "tipo" del producto.
-# Ajusta/agrega términos según lo que realmente aparezca en tus descripciones
-# (ej. dentro de "POLERONES": CAPUCHA, CUELLO REDONDO, etc.).
-PATRONES_DESCRIPCION = [
-    "CON CAPUCHA", "CAPUCHA", "CUELLO REDONDO", "CUELLO V", "CUELLO ALTO",
-    "CIERRE COMPLETO", "MEDIO CIERRE", "MANGA LARGA", "MANGA CORTA", "SIN MANGA",
-    "OVERSIZE", "SLIM", "REGULAR FIT", "JOGGER", "CARGO", "SKINNY", "RECTO", "WIDE LEG",
-]
-
-import re
-
-# Diccionario inteligente: unifica plurales (S opcional), abreviaturas y sinónimos
+# Diccionario inteligente: unifica plurales (S opcional), abreviaturas y sinónimos.
+# Lo usa clasificar_tipo_producto_inteligente() para normalizar la descripción
+# antes de agrupar por Tipo de Producto.
 SINONIMOS_Y_ABREVIATURAS = {
     # --- Plurales y Variantes Frecuentes ---
     r'\bSRAS?\b': 'SENORA',
@@ -61,22 +50,78 @@ SINONIMOS_Y_ABREVIATURAS = {
     r'\bINF\b': 'INFANTIL',
 }
 
-def detectar_patron_descripcion(descripcion):
+def categorias_representativas(df, columna_categoria, columna_stock='stock', umbral=0.60, max_categorias=9):
     """
-    Normaliza sinónimos, abreviaturas y plurales antes de cortar a 4 palabras.
+    Devuelve la lista de categorías (de mayor a menor stock) necesarias para
+    concentrar 'umbral' % del stock total de df, con max_categorias como
+    tope. Misma lógica de corte que usa crear_donut() para decidir qué
+    porciones mostrar, pero expuesta aparte para poder filtrar otros
+    gráficos (ej. Stock por Rango de Precio) por ese mismo subconjunto.
     """
-    texto = str(descripcion).strip().upper()
-    
-    # 1. Aplicar normalización por regex
-    for patron, reemplazo in SINONIMOS_Y_ABREVIATURAS.items():
-        texto = re.sub(patron, reemplazo, texto)
-        
-    # 2. Split y tomar las primeras 4 palabras
-    palabras = texto.split()
-    if not palabras:
-        return "SIN DESCRIPCIÓN"
-        
-    return " ".join(palabras[:4])
+    agrupado = df.groupby(columna_categoria)[columna_stock].sum().sort_values(ascending=False)
+    total = agrupado.sum()
+    if total <= 0:
+        return []
+    acumulado = agrupado.cumsum() / total
+    n_incluir = int((acumulado < umbral).sum()) + 1
+    n_incluir = max(1, min(n_incluir, max_categorias, len(agrupado)))
+    return agrupado.index[:n_incluir].tolist()
+
+def clasificar_tipo_producto_inteligente(df, columna_desc='descripcion', columna_stock='stock', max_palabras=4):
+    """
+    Agrupa productos para el gráfico "Stock por Tipo de Producto" buscando
+    coincidencias directamente en la columna DESCRIPCIÓN, en vez de un
+    diccionario fijo de patrones (el antiguo FAMILIAS_PRODUCTO, ya
+    eliminado), que resultaba demasiado genérico (ej. todo lo que dijera
+    "BLUSA" caía en una sola categoría, perdiendo el detalle real de la
+    descripción).
+
+    Para cada producto se prueba primero con sus primeras 4 palabras
+    (máxima especificidad, ej. "POLERA RIB CON BOTON"); si esa combinación
+    exacta es demasiado poco representativa (aparece en muy poco stock),
+    se retrocede a 3, luego 2, luego 1 palabra, hasta encontrar el nivel
+    en el que ese grupo sí concentra una porción relevante del stock total.
+    Así descripciones únicas o poco frecuentes se consolidan bajo un
+    término más general en vez de quedar como porciones microscópicas.
+    """
+    df = df.copy()
+    total_stock = pd.to_numeric(df[columna_stock], errors='coerce').fillna(0).sum()
+    # Un grupo se considera representativo si concentra al menos 0.5% del
+    # stock total; por debajo de eso, se prueba con una combinación más
+    # genérica (menos palabras).
+    min_stock_grupo = total_stock * 0.005
+
+    def normalizar(desc):
+        texto = str(desc).strip().upper()
+        if not texto or texto == "NAN":
+            return ""
+        for patron, reemplazo in SINONIMOS_Y_ABREVIATURAS.items():
+            texto = re.sub(patron, reemplazo, texto)
+        return texto
+
+    palabras_por_fila = df[columna_desc].apply(normalizar).apply(lambda t: t.split() if t else [])
+
+    # Para cada largo de N palabras (4 -> 1), se calcula cuánto stock
+    # concentra cada combinación de "primeras N palabras" en toda la base.
+    stock_por_prefijo = {}
+    for n in range(max_palabras, 0, -1):
+        prefijos_n = palabras_por_fila.apply(lambda p: " ".join(p[:n]) if len(p) >= n else None)
+        stock_por_prefijo[n] = df.groupby(prefijos_n)[columna_stock].sum()
+
+    def elegir_grupo(palabras):
+        if not palabras:
+            return "SIN DESCRIPCIÓN"
+        for n in range(max_palabras, 0, -1):
+            if len(palabras) >= n:
+                prefijo = " ".join(palabras[:n])
+                if stock_por_prefijo[n].get(prefijo, 0) >= min_stock_grupo:
+                    return prefijo
+        # Si ni con 1 palabra se alcanza el mínimo (caso raro), se usa
+        # igual para no perder el dato.
+        return palabras[0]
+
+    df['patron_detectado'] = palabras_por_fila.apply(elegir_grupo)
+    return df
 
 # --- 0. CONEXIÓN A GOOGLE DRIVE (carpetas públicas, sin cuenta de servicio) ---
 # Requisitos:
@@ -621,8 +666,8 @@ elif st.session_state.vista_actual == "grafico":
         for c in cols_texto:
             df[c] = df[c].astype(str).str.strip().str.upper().replace(['NAN', 'NONE', 'N/A', ''], 'SIN DATO')
 
-        # --- Filtros: Línea, Departamento y Subcategoría (en cascada) ---
-        g_c1, g_c2, g_c3 = st.columns(3)
+        # --- Filtros: Línea, Departamento, Subcategoría y Temporada (en cascada) ---
+        g_c1, g_c2, g_c3, g_c4 = st.columns(4)
         with g_c1:
             lista_lineas = sorted([str(x) for x in df['linea'].unique() if str(x) != "SIN DATO"])
             g_linea = st.selectbox("Línea", ["Todas"] + lista_lineas, key="g_linea")
@@ -634,8 +679,12 @@ elif st.session_state.vista_actual == "grafico":
             df_d = df_l if g_depto == "Todos" else df_l[df_l['departamento'] == g_depto]
             lista_subcats = sorted([str(x) for x in df_d['subcategoria'].unique() if str(x) != "SIN DATO"])
             g_subcat = st.selectbox("Subcategoría", ["Todas"] + lista_subcats, key="g_subcat")
+        with g_c4:
+            df_sc = df_d if g_subcat == "Todas" else df_d[df_d['subcategoria'] == g_subcat]
+            lista_temporadas = sorted([str(x) for x in df_sc['temporada'].unique() if str(x) != "SIN DATO"])
+            g_temp = st.selectbox("Temporada", ["Todas"] + lista_temporadas, key="g_temp")
 
-        df_g = df_d if g_subcat == "Todas" else df_d[df_d['subcategoria'] == g_subcat]
+        df_g = df_sc if g_temp == "Todas" else df_sc[df_sc['temporada'] == g_temp]
         df_g = df_g.copy()
         df_g['stock'] = pd.to_numeric(df_g['stock'], errors='coerce').fillna(0)
 
@@ -695,21 +744,41 @@ elif st.session_state.vista_actual == "grafico":
                     resultado.append('#000000' if luminancia > 160 else '#FFFFFF')
                 return resultado
 
-            def crear_donut(data, nombre_col, titulo, max_categorias=6, mostrar_vacios=False, invertir_colores=False):
+            def crear_donut(data, nombre_col, titulo, max_categorias=6, mostrar_vacios=False, invertir_colores=False, umbral_stock=1.0, colores_fijos=None):
+                # umbral_stock=1.0 por defecto = comportamiento original (solo
+                # corta por max_categorias). El corte al 60% de representatividad
+                # se activa puntualmente pasando umbral_stock=0.60 (ver gráfico
+                # "Stock por Tipo de Producto", que es el único que lo usa).
                 # mostrar_vacios=True incluye categorías sin stock (útil para que
                 # el gráfico de rango de precio muestre los 6 rangos siempre).
+                # colores_fijos={'ETIQUETA': 'rgb(r,g,b)'} fuerza ese color para
+                # esa categoría exacta, sin importar el ranking por stock (ej.
+                # que "SIN VENTA (0)" siempre se pinte rojo).
                 agrupado = data.groupby(nombre_col, observed=not mostrar_vacios)['stock'].sum().reset_index()
                 agrupado = agrupado.sort_values('stock', ascending=False).reset_index(drop=True)
                 # Ya no se agrupa en "OTROS": las categorías menos representativas
                 # (baja participación en stock) simplemente se excluyen del gráfico
                 # y se listan en un pie de página, en vez de mezclarse en una
                 # porción heterogénea que ensucia la torta.
+                # Se incluyen categorías (de mayor a menor stock) hasta alcanzar
+                # el umbral de representatividad (60% del stock por defecto);
+                # nunca menos de 1 ni más que max_categorias.
                 excluidos = []
-                if len(agrupado) > max_categorias:
-                    excluidos = agrupado.iloc[max_categorias:][nombre_col].tolist()
-                    agrupado = agrupado.iloc[:max_categorias].reset_index(drop=True)
+                total_general = agrupado['stock'].sum()
+                if total_general > 0:
+                    acumulado = agrupado['stock'].cumsum() / total_general
+                    n_incluir = int((acumulado < umbral_stock).sum()) + 1
+                    n_incluir = max(1, min(n_incluir, max_categorias, len(agrupado)))
+                    if n_incluir < len(agrupado):
+                        excluidos = agrupado.iloc[n_incluir:][nombre_col].tolist()
+                        agrupado = agrupado.iloc[:n_incluir].reset_index(drop=True)
 
                 colores = generar_colores_por_ranking(agrupado['stock'].tolist(), invertir=invertir_colores)
+                if colores_fijos:
+                    colores = [
+                        colores_fijos.get(valor, color)
+                        for valor, color in zip(agrupado[nombre_col], colores)
+                    ]
                 colores_texto = texto_con_contraste(colores)
 
                 # Se agrega el % directamente en el nombre de cada categoría para
@@ -728,29 +797,46 @@ elif st.session_state.vista_actual == "grafico":
                     sort=False,
                     marker=dict(colors=colores, line=dict(color='#FFFFFF', width=2)),
                     textposition='inside',
-                    insidetextorientation='radial',
+                    insidetextorientation='horizontal',
                     textinfo='percent',
                     texttemplate='%{percent:.1%}',
                     textfont=dict(size=12, color=colores_texto),
                     hovertemplate='%{label}: %{value:,.0f} unidades (%{percent})<extra></extra>'
                 )
                 fig.update_layout(
+                    autosize=True,
+                    height=380,  # Ya no se reserva espacio abajo para leyenda de Plotly
+                    margin=dict(t=50, b=20, l=20, r=20),
                     title=dict(
-                        text=titulo, x=0.5, xanchor='center', y=0.98, yanchor='top',
-                        font=dict(size=15, family="Arial, sans-serif", color="#333333")
+                        text=titulo,
+                        x=0.5,
+                        xanchor='center',
+                        font=dict(size=14, family="Arial, sans-serif", color="#333333")
                     ),
-                    showlegend=True,
-                    legend=dict(
-                        orientation="h", yanchor="top", y=-0.05, xanchor="center", x=0.5,
-                        font=dict(size=10), itemwidth=40
-                    ),
-                    uniformtext=dict(minsize=9, mode='hide'),
-                    margin=dict(t=55, b=10, l=10, r=10),
-                    height=380,
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)'
+                    showlegend=False  # La leyenda ahora se dibuja aparte, en grilla de 3 filas
                 )
-                return fig, excluidos
+
+                leyenda_items = list(zip(agrupado['etiqueta'], colores))
+                return fig, excluidos, leyenda_items
+
+            def renderizar_leyenda_grid(items, filas=3):
+                """
+                Dibuja la leyenda como grilla CSS: siempre 'filas' leyendas por
+                columna, agregando tantas columnas como haga falta (6 leyendas
+                -> 2 columnas de 3; 9 leyendas -> 3 columnas de 3), en vez de
+                depender del wrap horizontal de Plotly.
+                """
+                filas_html = "".join(
+                    f'<div style="display:flex;align-items:center;gap:6px;padding:2px 10px;">'
+                    f'<span style="width:10px;height:10px;border-radius:2px;background:{color};flex-shrink:0;"></span>'
+                    f'<span style="font-size:11px;color:#333;">{etiqueta}</span></div>'
+                    for etiqueta, color in items
+                )
+                st.markdown(
+                    f'<div style="display:grid;grid-template-rows:repeat({filas}, auto);'
+                    f'grid-auto-flow:column;justify-content:center;">{filas_html}</div>',
+                    unsafe_allow_html=True
+                )
 
             # --- Lista dinámica de gráficos a mostrar ---
             # Cada elemento es (data, columna, título, kwargs para crear_donut, nota opcional)
@@ -768,53 +854,91 @@ elif st.session_state.vista_actual == "grafico":
 
             # Mismo criterio: "Stock por Subcategoría" se oculta si ya se filtró
             # por una subcategoría específica (mostraría un solo segmento).
+            # tipos_60: categorías de "tipo de producto" que concentran el 60%
+            # del stock de la subcategoría filtrada. Se define solo cuando hay
+            # una subcategoría específica seleccionada (ver más abajo);
+            # también la usa el gráfico de Stock por Rango de Precio.
+            tipos_60 = None
+
             if g_subcat == "Todas":
                 graficos.append((df_g, 'subcategoria', '📦 Stock por Subcategoría', {}, None))
             elif 'descripcion' in df_g.columns:
-                df_patron = df_g.copy()
-                df_patron['patron_detectado'] = df_patron['descripcion'].apply(detectar_patron_descripcion)
+                df_patron = clasificar_tipo_producto_inteligente(df_g)
+                tipos_60 = categorias_representativas(df_patron, 'patron_detectado', max_categorias=9)
+
                 graficos.append((
-                    df_patron, 'patron_detectado', '🔎 Stock por Tipo de Producto', {},
-                    None
+                    df_patron, 'patron_detectado', '🔎 Stock por Tipo de Producto',
+                    {'umbral_stock': 0.60, 'max_categorias': 9}, None
                 ))
 
-            graficos.append((df_g, 'temporada', '🗓️ Stock por Temporada', {}, None))
+            # El gráfico "Stock por Temporada" se oculta cuando ya se filtró por
+            # una temporada específica, porque en ese caso mostraría un solo
+            # segmento (100%) sin valor, igual que Línea/Departamento/Subcategoría.
+            if g_temp == "Todas":
+                graficos.append((df_g, 'temporada', '🗓️ Stock por Temporada', {}, None))
 
             df_g['estado_venta'] = df_g[col_venta_mes].apply(
                 lambda x: 'CON VENTA' if pd.to_numeric(x, errors='coerce') > 0 else 'SIN VENTA (0)'
             )
-            graficos.append((df_g, 'estado_venta', '📉 Venta 0 Total', {}, None))
+            graficos.append((
+                df_g, 'estado_venta', '📉 Venta 0 Total',
+                {'colores_fijos': {'SIN VENTA (0)': 'rgb(183,28,28)'}}, None
+            ))
 
             # Desglose por temporada, solo de los productos sin venta (venta 0),
-            # para verlo justo al lado del de "Venta 0 Total".
+            # para verlo justo al lado del de "Venta 0 Total". Se oculta con el
+            # mismo criterio que "Stock por Temporada": si ya se filtró por una
+            # temporada específica, mostraría un solo segmento sin valor.
             df_venta0 = df_g[df_g['estado_venta'] == 'SIN VENTA (0)']
-            if not df_venta0.empty:
+            if g_temp == "Todas" and not df_venta0.empty:
                 graficos.append((
                     df_venta0, 'temporada', '📉 Venta 0 por Temporada', {'invertir_colores': True},
                     "Muestra participación de solo códigos sin venta este mes"
                 ))
 
-            # --- Gráfico de Precios (por rangos) ---
+            # --- Gráfico de Precios ---
             df_precio = df_g.copy()
+            nota_precio = None
+            if g_subcat != "Todas" and tipos_60:
+                # Al filtrar una subcategoría, el gráfico de precios se calcula
+                # solo sobre los tipos de producto que concentran el 60% del
+                # stock de esa subcategoría (mismo subconjunto que el gráfico
+                # "Stock por Tipo de Producto"), para no diluir la
+                # distribución de precios con la larga cola de tipos
+                # minoritarios.
+                df_precio = df_precio.loc[df_patron['patron_detectado'].isin(tipos_60)]
+                nota_precio = "Incluye solo los tipos de producto que concentran el 60% del stock de esta subcategoría"
             df_precio['nuevo precio'] = pd.to_numeric(df_precio['nuevo precio'], errors='coerce').fillna(0)
             df_precio = df_precio[df_precio['nuevo precio'] > 0]
             if not df_precio.empty:
-                bins = [0, 9990, 19990, 29990, 39990, 49990, float('inf')]
-                labels = [
-                    'Hasta $9.990', '$10.000 - $19.990', '$20.000 - $29.990',
-                    '$30.000 - $39.990', '$40.000 - $49.990', '$50.000 y más'
-                ]
-                df_precio['rango_precio'] = pd.cut(
-                    df_precio['nuevo precio'], bins=bins, labels=labels, include_lowest=True
-                )
-                # Con un departamento específico seleccionado hay menos datos, así que
-                # mostramos los 6 rangos completos (incluso los que quedan en 0). En la
-                # vista amplia por Línea, para evitar saturar la torta, priorizamos solo
-                # los rangos que sí concentran stock (los vacíos no se muestran).
-                graficos.append((
-                    df_precio, 'rango_precio', '💲 Stock por Rango de Precio',
-                    {'max_categorias': 6, 'mostrar_vacios': g_depto != "Todos"}, None
-                ))
+                if g_subcat != "Todas":
+                    # Con una subcategoría filtrada se pide el detalle por
+                    # precio exacto (ej. "$7.990"), no por rango, para ver
+                    # qué precios puntuales concentran el stock.
+                    df_precio['precio_exacto'] = df_precio['nuevo precio'].apply(
+                        lambda v: f"${v:,.0f}".replace(',', '.')
+                    )
+                    graficos.append((
+                        df_precio, 'precio_exacto', '💲 Stock por Precio',
+                        {'umbral_stock': 0.60, 'max_categorias': 9}, nota_precio
+                    ))
+                else:
+                    bins = [0, 9990, 19990, 29990, 39990, 49990, float('inf')]
+                    labels = [
+                        'Hasta $9.990', '$10.000 - $19.990', '$20.000 - $29.990',
+                        '$30.000 - $39.990', '$40.000 - $49.990', '$50.000 y más'
+                    ]
+                    df_precio['rango_precio'] = pd.cut(
+                        df_precio['nuevo precio'], bins=bins, labels=labels, include_lowest=True
+                    )
+                    # Sin subcategoría filtrada (vista amplia) se mantiene el
+                    # desglose por rango, mostrando los 6 rangos completos si
+                    # hay un departamento específico seleccionado, o solo los
+                    # que concentran stock en la vista general por Línea.
+                    graficos.append((
+                        df_precio, 'rango_precio', '💲 Stock por Rango de Precio',
+                        {'max_categorias': 6, 'mostrar_vacios': g_depto != "Todos"}, None
+                    ))
 
             # --- Renderizado en filas de 3 columnas ---
             etiquetas_campo = {
@@ -824,6 +948,7 @@ elif st.session_state.vista_actual == "grafico":
                 'temporada': 'temporada', 
                 'estado_venta': 'estado de venta', 
                 'rango_precio': 'rango de precio',
+                'precio_exacto': 'precio',
                 'patron_detectado': 'tipo de producto'  # <--- AGREGAR ESTA LÍNEA
             }
             for i in range(0, len(graficos), 3):
@@ -831,8 +956,9 @@ elif st.session_state.vista_actual == "grafico":
                 cols = st.columns(len(fila))
                 for col, (data_g, campo, titulo, kwargs, nota) in zip(cols, fila):
                     with col:
-                        fig, excluidos = crear_donut(data_g, campo, titulo, **kwargs)
+                        fig, excluidos, leyenda_items = crear_donut(data_g, campo, titulo, **kwargs)
                         st.plotly_chart(fig, use_container_width=True)
+                        renderizar_leyenda_grid(leyenda_items)
                         if nota:
                             st.caption(f"ℹ️ {nota}")
                         if excluidos:
