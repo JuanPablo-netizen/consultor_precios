@@ -882,7 +882,7 @@ elif st.session_state.vista_actual == "grafico":
             )
             graficos.append((
                 df_g, 'estado_venta', '📉 Venta 0 Total',
-                {'colores_fijos': {'SIN VENTA (0)': 'rgb(183,28,28)'}}, None
+                {'colores_fijos': {'SIN VENTA (0)': 'rgb(183,28,28)', 'CON VENTA': 'rgb(46,125,50)'}}, None
             ))
 
             # Desglose por temporada, solo de los productos sin venta (venta 0),
