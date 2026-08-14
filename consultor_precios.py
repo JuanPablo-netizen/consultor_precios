@@ -744,7 +744,7 @@ elif st.session_state.vista_actual == "grafico":
                     resultado.append('#000000' if luminancia > 160 else '#FFFFFF')
                 return resultado
 
-            def crear_donut(data, nombre_col, titulo, max_categorias=6, mostrar_vacios=False, invertir_colores=False, umbral_stock=1.0, colores_fijos=None):
+            def crear_donut(data, nombre_col, titulo, max_categorias=6, mostrar_vacios=False, invertir_colores=False, umbral_stock=1.0, colores_fijos=None, columna_valor='stock', unidad='unidades', mostrar_conteo_codigos=False):
                 # umbral_stock=1.0 por defecto = comportamiento original (solo
                 # corta por max_categorias). El corte al 60% de representatividad
                 # se activa puntualmente pasando umbral_stock=0.60 (ver gráfico
@@ -754,8 +754,8 @@ elif st.session_state.vista_actual == "grafico":
                 # colores_fijos={'ETIQUETA': 'rgb(r,g,b)'} fuerza ese color para
                 # esa categoría exacta, sin importar el ranking por stock (ej.
                 # que "SIN VENTA (0)" siempre se pinte rojo).
-                agrupado = data.groupby(nombre_col, observed=not mostrar_vacios)['stock'].sum().reset_index()
-                agrupado = agrupado.sort_values('stock', ascending=False).reset_index(drop=True)
+                agrupado = data.groupby(nombre_col, observed=not mostrar_vacios)[columna_valor].sum().reset_index()
+                agrupado = agrupado.sort_values(columna_valor, ascending=False).reset_index(drop=True)
                 # Ya no se agrupa en "OTROS": las categorías menos representativas
                 # (baja participación en stock) simplemente se excluyen del gráfico
                 # y se listan en un pie de página, en vez de mezclarse en una
@@ -764,16 +764,20 @@ elif st.session_state.vista_actual == "grafico":
                 # el umbral de representatividad (60% del stock por defecto);
                 # nunca menos de 1 ni más que max_categorias.
                 excluidos = []
-                total_general = agrupado['stock'].sum()
+                total_general = agrupado[columna_valor].sum()
                 if total_general > 0:
-                    acumulado = agrupado['stock'].cumsum() / total_general
+                    acumulado = agrupado[columna_valor].cumsum() / total_general
                     n_incluir = int((acumulado < umbral_stock).sum()) + 1
                     n_incluir = max(1, min(n_incluir, max_categorias, len(agrupado)))
                     if n_incluir < len(agrupado):
                         excluidos = agrupado.iloc[n_incluir:][nombre_col].tolist()
                         agrupado = agrupado.iloc[:n_incluir].reset_index(drop=True)
 
-                colores = generar_colores_por_ranking(agrupado['stock'].tolist(), invertir=invertir_colores)
+                if mostrar_conteo_codigos:
+                    conteo_serie = data.groupby(nombre_col, observed=not mostrar_vacios).size()
+                    agrupado['conteo_codigos'] = agrupado[nombre_col].map(conteo_serie).fillna(0).astype(int)
+
+                colores = generar_colores_por_ranking(agrupado[columna_valor].tolist(), invertir=invertir_colores)
                 if colores_fijos:
                     colores = [
                         colores_fijos.get(valor, color)
@@ -783,13 +787,14 @@ elif st.session_state.vista_actual == "grafico":
 
                 # Se agrega el % directamente en el nombre de cada categoría para
                 # que la leyenda muestre "NOMBRE (XX.X%)" y sea más fácil de leer.
-                total_grupo = agrupado['stock'].sum()
+                total_grupo = agrupado[columna_valor].sum()
                 agrupado['etiqueta'] = agrupado.apply(
-                    lambda r: f"{r[nombre_col]} ({(r['stock'] / total_grupo * 100):.1f}%)", axis=1
+                    lambda r: f"{r[nombre_col]} ({(r[columna_valor] / total_grupo * 100):.1f}%)", axis=1
                 )
 
                 fig = px.pie(
-                    agrupado, values='stock', names='etiqueta', hole=0.55
+                    agrupado, values=columna_valor, names='etiqueta', hole=0.55,
+                    custom_data=['conteo_codigos'] if mostrar_conteo_codigos else None
                 )
                 # sort=False asegura que el orden de las porciones coincida exactamente
                 # con el orden (mayor→menor) usado para calcular los colores.
@@ -801,7 +806,11 @@ elif st.session_state.vista_actual == "grafico":
                     textinfo='percent',
                     texttemplate='%{percent:.1%}',
                     textfont=dict(size=12, color=colores_texto),
-                    hovertemplate='%{label}: %{value:,.0f} unidades (%{percent})<extra></extra>'
+                    hovertemplate=(
+                        f'%{{label}}: %{{value:,.0f}} {unidad} / %{{customdata[0]}} códigos (%{{percent}})<extra></extra>'
+                        if mostrar_conteo_codigos else
+                        f'%{{label}}: %{{value:,.0f}} {unidad} (%{{percent}})<extra></extra>'
+                    )
                 )
                 fig.update_layout(
                     autosize=True,
@@ -884,6 +893,27 @@ elif st.session_state.vista_actual == "grafico":
                 df_g, 'estado_venta', '📉 Venta 0 Total',
                 {'colores_fijos': {'SIN VENTA (0)': 'rgb(183,28,28)', 'CON VENTA': 'rgb(46,125,50)'}}, None
             ))
+
+            # "Venta 0 por Subcategoría": en realidad agrupa por tipo de producto
+            # (mismo patron_detectado que "Stock por Tipo de Producto"), mostrando
+            # qué tipos concentran más códigos sin venta este mes. Solo tiene
+            # sentido cuando ya hay subcategoría Y temporada filtradas (por eso usa
+            # df_patron, que solo existe en esa rama).
+            if g_subcat != "Todas" and g_temp != "Todas" and 'patron_detectado' in df_patron.columns:
+                df_patron_v0 = df_patron.copy()
+                df_patron_v0['estado_venta'] = df_patron_v0[col_venta_mes].apply(
+                    lambda x: 'CON VENTA' if pd.to_numeric(x, errors='coerce') > 0 else 'SIN VENTA (0)'
+                )
+                df_patron_v0['stock_num'] = pd.to_numeric(df_patron_v0['stock'], errors='coerce').fillna(0)
+                df_v0_tipo = df_patron_v0[
+                    (df_patron_v0['estado_venta'] == 'SIN VENTA (0)') & (df_patron_v0['stock_num'] >= 5)
+                ].copy()
+                if not df_v0_tipo.empty:
+                    graficos.append((
+                        df_v0_tipo, 'patron_detectado', '📉 Venta 0 por Subcategoría',
+                        {'invertir_colores': True, 'max_categorias': 9, 'mostrar_conteo_codigos': True},
+                        "Stock sin venta este mes (stock ≥ 5), por tipo de producto — qué productos concentran el % de Venta 0 Total"
+                    ))
 
             # Desglose por temporada, solo de los productos sin venta (venta 0),
             # para verlo justo al lado del de "Venta 0 Total". Se oculta con el
