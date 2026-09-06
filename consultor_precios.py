@@ -50,6 +50,19 @@ SINONIMOS_Y_ABREVIATURAS = {
     r'\bINF\b': 'INFANTIL',
 }
 
+def es_departamento_ecommerce(valor):
+    """
+    Detecta si un valor de Departamento corresponde a e-commerce, sin
+    importar guiones, espacios, mayúsculas/minúsculas o variantes
+    (E-COM, E-COMM, ECOMMERCE, E COMMERCE, etc.).
+    """
+    texto = re.sub(r'[^A-Za-z0-9]', '', str(valor)).upper()
+    return 'ECOM' in texto
+
+def filtrar_departamentos_ecommerce(lista_deptos):
+    """Quita de una lista de departamentos cualquier variante de e-commerce."""
+    return [d for d in lista_deptos if not es_departamento_ecommerce(d)]
+
 def categorias_representativas(df, columna_categoria, columna_stock='stock', umbral=0.60, max_categorias=9):
     """
     Devuelve la lista de categorías (de mayor a menor stock) necesarias para
@@ -492,6 +505,7 @@ if st.session_state.vista_actual == "listado":
         with f1_col2:
             df_l = df if f_linea == "Todas" else df[df['linea'] == f_linea]
             lista_deptos = sorted([str(x) for x in df_l['departamento'].unique() if str(x) != "SIN DATO"])
+            lista_deptos = filtrar_departamentos_ecommerce(lista_deptos)
             f_depto = st.selectbox("Departamento", ["Todos"] + lista_deptos)
         with f1_col3:
             df_d = df_l if f_depto == "Todos" else df_l[df_l['departamento'] == f_depto]
@@ -674,6 +688,7 @@ elif st.session_state.vista_actual == "grafico":
         with g_c2:
             df_l = df if g_linea == "Todas" else df[df['linea'] == g_linea]
             lista_deptos = sorted([str(x) for x in df_l['departamento'].unique() if str(x) != "SIN DATO"])
+            lista_deptos = filtrar_departamentos_ecommerce(lista_deptos)
             g_depto = st.selectbox("Departamento", ["Todos"] + lista_deptos, key="g_depto")
         with g_c3:
             df_d = df_l if g_depto == "Todos" else df_l[df_l['departamento'] == g_depto]
