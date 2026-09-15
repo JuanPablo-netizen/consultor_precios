@@ -219,6 +219,26 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# --- CONTROL DE ACCESO: solo se permite entrar mediante el botón del Panel de Gestión (app.py) ---
+CLAVE_ACCESO_CONSULTOR = "curico1-2026-xk9"  # debe ser IDÉNTICA a la que pusiste en app.py
+
+try:
+    clave_recibida = st.query_params.get("acceso", "")
+except Exception:
+    clave_recibida = st.experimental_get_query_params().get("acceso", [""])[0]
+
+if clave_recibida != CLAVE_ACCESO_CONSULTOR:
+    st.markdown("""
+        <div style="max-width:420px; margin: 15% auto; text-align:center; padding: 25px;
+                    background-color:#FEE2E2; border:2px solid #D32F2F; border-radius:15px;">
+            <h2 style="color:#D32F2F; margin:0;">🔒 Acceso restringido</h2>
+            <p style="color:#D32F2F; font-weight:700; margin-top:10px;">
+                Debes ingresar por tu panel de Gestión
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+    st.stop()
+
 # --- 2. FUNCIONES DE APOYO (Sonido y Auto-Enter) ---
 def emitir_sonido_ok():
     audio_url = "https://www.soundjay.com/buttons/sounds/button-37a.mp3"
