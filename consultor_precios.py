@@ -317,6 +317,12 @@ def obtener_datos():
         df['producto'] = pd.to_numeric(df['producto'], errors='coerce')
         df = df.dropna(subset=['producto'])
         df['producto'] = df['producto'].astype('int64').astype(str).str.strip()
+        # Columna AÑO (viene de la base; el externo la trae como ANO)
+        df = df.rename(columns={'ano': 'año'})
+        if 'año' not in df.columns:
+            df['año'] = None
+        _n = pd.to_numeric(df['año'], errors='coerce')
+        df['año'] = _n.astype('Int64').astype(str).where(_n.notna(), 'SIN DATO')
         return df
     except Exception as e:
         st.error(f"⚠️ Error técnico detallado: {e}")
@@ -420,9 +426,9 @@ def generar_pdf_completo(image_bytes, df, titulo, advertencias=""):
     return bytes(pdf.output(dest='S'))
 
 def generar_pdf(df, depto, subcat, filtro_venta):
-    # Definición exacta para las 9 columnas en milímetros (Suma total: 260 mm)
-    # [PRODUCTO, DESCRIPCIÓN, MARCA, TEMPORADA, STOCK, PRECIO, U.VENDIDAS, OBSERVACIONES, STOCK EN SALA]
-    col_widths = [18, 65, 25, 25, 15, 22, 20, 45, 25] 
+    # Definición exacta para las 10 columnas en milímetros (Suma total: 262 mm)
+    # [PRODUCTO, DESCRIPCIÓN, MARCA, TEMPORADA, AÑO, STOCK, PRECIO, U.VENDIDAS, OBSERVACIONES, STOCK EN SALA]
+    col_widths = [18, 60, 25, 25, 12, 15, 22, 20, 40, 25] 
     
     anchos_reales = col_widths[:len(df.columns)]  
     total_width = sum(anchos_reales)              
@@ -514,7 +520,7 @@ if st.session_state.vista_actual == "listado":
         hoy = datetime.now()
         col_venta_mes = f"ventas {hoy.strftime('%m')}"
 
-        cols_texto = ['linea', 'departamento', 'subcategoria', 'temporada', 'marca']
+        cols_texto = ['linea', 'departamento', 'subcategoria', 'temporada', 'año', 'marca']
         for c in cols_texto:
             df[c] = df[c].astype(str).str.strip().str.upper().replace(['NAN', 'NONE', 'N/A', ''], 'SIN DATO')
 
@@ -536,10 +542,13 @@ if st.session_state.vista_actual == "listado":
             lista_marcas = sorted([str(x) for x in df_s['marca'].unique() if str(x) != "SIN DATO"])
             f_marca = st.selectbox("Marca", ["Todas"] + lista_marcas)
 
-        f2_c1, f2_c2, f2_c3, f2_c4 = st.columns(4)
+        f2_c1, f2_c1b, f2_c2, f2_c3, f2_c4 = st.columns(5)
         with f2_c1:
             lista_temp = sorted([str(x) for x in df_s['temporada'].unique() if str(x) != "SIN DATO"])
             f_temp = st.selectbox("Temporada", ["Todas"] + lista_temp)
+        with f2_c1b:
+            lista_anos = sorted([str(x) for x in df_s['año'].unique() if str(x) != "SIN DATO"], reverse=True)
+            f_ano = st.selectbox("Año", ["Todos"] + lista_anos)
         with f2_c2:
             f_venta_cero = st.selectbox("Filtrar Venta 0", ["Ambos", "Solo Venta 0", "Solo con Venta"])
         with f2_c3:
@@ -559,14 +568,18 @@ if st.session_state.vista_actual == "listado":
             opciones_obs = ["Todas", "Solo sin Observaciones"] + lista_obs
             f_obs = st.selectbox("Observaciones", opciones_obs)
 
-        col_c1, = st.columns(1)
+        col_c1, col_c2 = st.columns([1, 3])
         with col_c1:
+            f_stock_neg = st.selectbox("Stock negativo", ["Todos", "Solo stock negativo", "Sin stock negativo"])
+        with col_c2:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
             f_pareto = st.checkbox("80% del Stock")
 
         f_buscar = st.text_input("🔎 Busqueda Específica", placeholder="Ej: Vest, Denim, etc.")
 
         df_mostrar = df_s.copy()
         if f_temp != "Todas": df_mostrar = df_mostrar[df_mostrar['temporada'] == f_temp]
+        if f_ano != "Todos": df_mostrar = df_mostrar[df_mostrar['año'] == f_ano]
         if f_marca != "Todas": df_mostrar = df_mostrar[df_mostrar['marca'] == f_marca]
         if f_precio != "Todos": df_mostrar = df_mostrar[df_mostrar['nuevo precio'] == f_precio]
         if f_buscar.strip():
@@ -589,6 +602,12 @@ if st.session_state.vista_actual == "listado":
         elif f_obs != "Todas":
             df_mostrar = df_mostrar[df_mostrar['observaciones'].astype(str).str.strip() == f_obs]
         
+        _stock_num = pd.to_numeric(df_mostrar['stock'], errors='coerce').fillna(0)
+        if f_stock_neg == "Solo stock negativo":
+            df_mostrar = df_mostrar[_stock_num < 0]
+        elif f_stock_neg == "Sin stock negativo":
+            df_mostrar = df_mostrar[_stock_num >= 0]
+
         if f_pareto:
             df_mostrar = df_mostrar.sort_values(by='stock', ascending=False)
             total_st = df_mostrar['stock'].sum()
@@ -621,7 +640,7 @@ if st.session_state.vista_actual == "listado":
             # --- MODIFICADO: Se añade 'observaciones' al final del mapa ---
             mapa_columnas = {
                 'producto': 'PRODUCTO', 'descripcion': 'DESCRIPCIÓN', 'marca': 'MARCA',
-                'temporada': 'TEMPORADA', 'stock': 'STOCK', 'nuevo precio': 'PRECIO',
+                'temporada': 'TEMPORADA', 'año': 'AÑO', 'stock': 'STOCK', 'nuevo precio': 'PRECIO',
                 col_venta_mes: 'U. VENDIDAS', 'observaciones': 'OBSERVACIONES'
             }
             df_vista = df_mostrar[[c for c in mapa_columnas.keys() if c in df_mostrar.columns]].rename(columns=mapa_columnas)
@@ -696,12 +715,12 @@ elif st.session_state.vista_actual == "grafico":
         hoy = datetime.now()
         col_venta_mes = f"ventas {hoy.strftime('%m')}"
 
-        cols_texto = ['linea', 'departamento', 'subcategoria', 'temporada', 'marca']
+        cols_texto = ['linea', 'departamento', 'subcategoria', 'temporada', 'año', 'marca']
         for c in cols_texto:
             df[c] = df[c].astype(str).str.strip().str.upper().replace(['NAN', 'NONE', 'N/A', ''], 'SIN DATO')
 
         # --- Filtros: Línea, Departamento, Subcategoría y Temporada (en cascada) ---
-        g_c1, g_c2, g_c3, g_c4 = st.columns(4)
+        g_c1, g_c2, g_c3, g_c4, g_c5 = st.columns(5)
         with g_c1:
             lista_lineas = sorted([str(x) for x in df['linea'].unique() if str(x) != "SIN DATO"])
             g_linea = st.selectbox("Línea", ["Todas"] + lista_lineas, key="g_linea")
@@ -718,8 +737,12 @@ elif st.session_state.vista_actual == "grafico":
             df_sc = df_d if g_subcat == "Todas" else df_d[df_d['subcategoria'] == g_subcat]
             lista_temporadas = sorted([str(x) for x in df_sc['temporada'].unique() if str(x) != "SIN DATO"])
             g_temp = st.selectbox("Temporada", ["Todas"] + lista_temporadas, key="g_temp")
+        with g_c5:
+            df_t = df_sc if g_temp == "Todas" else df_sc[df_sc['temporada'] == g_temp]
+            lista_anos_g = sorted([str(x) for x in df_t['año'].unique() if str(x) != "SIN DATO"], reverse=True)
+            g_ano = st.selectbox("Año", ["Todos"] + lista_anos_g, key="g_ano")
 
-        df_g = df_sc if g_temp == "Todas" else df_sc[df_sc['temporada'] == g_temp]
+        df_g = df_t if g_ano == "Todos" else df_t[df_t['año'] == g_ano]
         df_g = df_g.copy()
         df_g['stock'] = pd.to_numeric(df_g['stock'], errors='coerce').fillna(0)
 
