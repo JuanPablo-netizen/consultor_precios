@@ -568,10 +568,13 @@ if st.session_state.vista_actual == "listado":
             opciones_obs = ["Todas", "Solo sin Observaciones"] + lista_obs
             f_obs = st.selectbox("Observaciones", opciones_obs)
 
-        col_c1, col_c2 = st.columns([1, 3])
+        col_c1, col_c2, col_c3 = st.columns([1, 1, 2])
         with col_c1:
             f_stock_neg = st.selectbox("Stock negativo", ["Todos", "Solo stock negativo", "Sin stock negativo"])
         with col_c2:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            f_ocultar_cero = st.checkbox("Ocultar stock 0")
+        with col_c3:
             st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
             f_pareto = st.checkbox("80% del Stock")
 
@@ -603,6 +606,10 @@ if st.session_state.vista_actual == "listado":
             df_mostrar = df_mostrar[df_mostrar['observaciones'].astype(str).str.strip() == f_obs]
         
         _stock_num = pd.to_numeric(df_mostrar['stock'], errors='coerce').fillna(0)
+        if f_ocultar_cero:
+            df_mostrar = df_mostrar[_stock_num != 0]
+            _stock_num = _stock_num[_stock_num != 0]
+
         if f_stock_neg == "Solo stock negativo":
             df_mostrar = df_mostrar[_stock_num < 0]
         elif f_stock_neg == "Sin stock negativo":
